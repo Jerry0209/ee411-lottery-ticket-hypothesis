@@ -40,15 +40,15 @@ ee411-lottery-ticket-hypothesis/
 
 1. **Clone the Repository and checkout to your branch (already created)**
 
-Guideline at the end of the document.
+    - Guideline at the end of the document.
 
 2. **Install dependencies (if not yet)**
-`requirements.txt` only for reference
+    - `requirements.txt` only for reference
+    - There is also a reference environment on WSL in environment.yml in the main branch.
 
 ```bash
 pip install -r requirements.txt
 ```
-There is also a reference environment on WSL in environment.yml in the main branch.
 
 
 3. Copy the template:
@@ -75,7 +75,7 @@ There is also a reference environment on WSL in environment.yml in the main bran
 - Compare results across different models
 
 
-## 🔧 Git Workflow (Detailed Guide)
+## Git Workflow (Detailed Guide)
 
 ### Basic Git Commands You Need to Know
 
@@ -140,7 +140,6 @@ git checkout your-name-dev
 git merge main
 ```
 
----
 
 ## 📖 Complete Git Workflow Example
 
@@ -197,6 +196,7 @@ git status
 
 # 2. Add your changes
 git add notebooks/katherine/conv2_experiment.ipynb
+git add results/figures/katherine_*.png       
 
 # 3. Commit with a message
 git commit -m "Complete Conv-2 baseline training"
@@ -207,7 +207,14 @@ git push
 # Done! Your work is saved online.
 ```
 
----
+#### Viewing Results on GitHub
+1. Go to the repository on GitHub
+2. Switch branches using the branch dropdown (top-left)
+3. Navigate to `results/figures/` to view plots
+4. Navigate to `results/data/` to view JSON results
+5. Compare branches to see different team members' results
+
+
 
 ## 🛠️ Common Git Scenarios
 
@@ -290,7 +297,7 @@ git commit -m "Resolve merge conflict in pruning.py"
 git push
 ```
 
----
+
 
 ## ⚠️ Important Rules
 
@@ -314,7 +321,6 @@ git push
 - If you find a bug, tell Jerry (don't fix it yourself)
 - This prevents conflicts
 
----
 
 ## Quick Reference Card
 
