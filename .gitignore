@@ -12,19 +12,33 @@ venv/
 *.ipynb_checkpoints
 
 # Experiment Results
+# Large model files (don't upload)
 results/checkpoints/*.pth
 results/checkpoints/*.pt
 *.pth
 *.pt
 
-# Downloaded Dataset
+# Downloaded Dataset (don't upload)
 data/
 *.tar.gz
+*.zip
+
+# Logs (don't upload if large)
+results/logs/*.log
+
+
+# BUT allow specific result files:
+# Results we WANT in git:
+!results/figures/*.png
+!results/figures/*.pdf
+!results/*.json
+!results/*.csv
 
 # IDE
 .vscode/
 .idea/
 *.swp
+*.swo
 
 # Mac
 .DS_Store
@@ -32,4 +46,9 @@ data/
 # Windows WSL Zone.Identifier files
 *:Zone.Identifier
 *.Zone.Identifier
+
+# Temporary files
+*.tmp
+*~
+.cache/
 
