@@ -28,3 +28,8 @@ data/
 
 # Mac
 .DS_Store
+
+# Windows WSL Zone.Identifier files
+*:Zone.Identifier
+*.Zone.Identifier
+
