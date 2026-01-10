@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
 from torch.utils.data import DataLoader
+from typing import Optional # Add this import
 
 
 def train_epoch(
@@ -53,6 +54,7 @@ def fit(
     optimizer: torch.optim.Optimizer,
     epochs: int,
     device: torch.device,
+    scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None, # New! Add this arg
 ):
     """
     the fit method simply calls the train_epoch() method for a
@@ -68,6 +70,14 @@ def fit(
             optimizer=optimizer,
             device=device,
         )
+
+        # === Add this block === # New!
+        if scheduler is not None:
+            scheduler.step()
+            # Optional: print current LR to verify
+            # print(f"LR: {scheduler.get_last_lr()[0]}")
+        # ======================
+
         print(f"Epoch {epoch}: Loss={running_loss}")
         losses.append(running_loss)
 

@@ -211,7 +211,9 @@ def create_global_mask(
         if 'weight' not in name:
             continue
         
-        if is_conv_layer(name, param):
+        # if is_conv_layer(name, param) :
+        # New! Usually the shortcut layer named 'downsample' in ResNet should not be pruned
+        if is_conv_layer(name, param) and 'downsample' not in name:
             all_conv_weights.append(param.data.flatten())
             conv_params.append((name, param))
         else:
@@ -221,7 +223,19 @@ def create_global_mask(
     # Calculate global threshold across all conv layers
     if len(all_conv_weights) > 0 and prune_rate_conv > 0.0:
         all_weights = torch.cat(all_conv_weights)
-        global_threshold = torch.quantile(torch.abs(all_weights), prune_rate_conv)
+        
+        # global_threshold = torch.quantile(torch.abs(all_weights), prune_rate_conv)
+
+        # === Fix Start ===
+        # Only count non-zero weights for threshold calculation
+        # non_zero_weights = all_weights[all_weights != 0] 
+        non_zero_weights = all_weights[torch.abs(all_weights) > 1e-8]
+        
+        if len(non_zero_weights) > 0:
+            global_threshold = torch.quantile(torch.abs(non_zero_weights), prune_rate_conv)
+        else:
+            global_threshold = 0.0
+        # === Fixed End ===
         
         # Apply global threshold to each conv layer
         for name, param in conv_params:
@@ -259,7 +273,8 @@ def train_model(
     device: torch.device,
     epochs: int = 1,
     mask: Optional[Dict] = None,
-    verbose: bool = True
+    verbose: bool = True,
+    scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None # New !
 ) -> List[float]:
     """
     Train model for specified epochs.
@@ -305,6 +320,10 @@ def train_model(
         
         if verbose:
             print(f"Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.4f}")
+
+        # Step the scheduler (if provided) New !
+        if scheduler is not None:
+            scheduler.step()
     
     return losses
 
@@ -439,6 +458,29 @@ def iterative_pruning(
         # Step 2: Train the model
         optimizer = optimizer_class(model.parameters(), **optimizer_kwargs)
         criterion = nn.CrossEntropyLoss()
+
+        # === NEW: Setup Scheduler for ResNet-18 ===
+        # ResNet-18 requires specific LR decay at 20k and 25k iterations.
+        # We calculate milestones dynamically based on epochs_per_round.
+        scheduler = None
+
+        # Check if we are running the ResNet-18 config
+        if 'resnet18' in config.get('description', '').lower():
+            # Milestone 1: ~20k/30k iterations (2/3 of training)
+            m1 = int(epochs_per_round * 0.66)
+            # Milestone 2: ~25k/30k iterations (5/6 of training)
+            m2 = int(epochs_per_round * 0.83)
+            
+            scheduler = torch.optim.lr_scheduler.MultiStepLR(
+                optimizer, 
+                milestones=[m1, m2], 
+                gamma=0.1
+            )
+            
+            if verbose:
+                print(f"Scheduler enabled: MultiStepLR at epochs {m1} and {m2}")
+
+        
         
         train_losses = train_model(
             model=model,
@@ -448,6 +490,7 @@ def iterative_pruning(
             device=device,
             epochs=epochs_per_round,
             mask=current_mask,
+            scheduler=scheduler,  # <--- Critical Change (New!)
             verbose=verbose
         )
         
