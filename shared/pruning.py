@@ -13,7 +13,7 @@ Based on: "The Lottery Ticket Hypothesis" (Frankle & Carbin, 2019)
 import copy
 import torch
 import torch.nn as nn
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Type
 from tqdm import tqdm
 
 
@@ -211,7 +211,9 @@ def create_global_mask(
         if 'weight' not in name:
             continue
         
-        if is_conv_layer(name, param):
+        # if is_conv_layer(name, param) :
+        # New! Usually the shortcut layer named 'downsample' in ResNet should not be pruned
+        if is_conv_layer(name, param) and 'downsample' not in name:
             all_conv_weights.append(param.data.flatten())
             conv_params.append((name, param))
         else:
@@ -221,7 +223,19 @@ def create_global_mask(
     # Calculate global threshold across all conv layers
     if len(all_conv_weights) > 0 and prune_rate_conv > 0.0:
         all_weights = torch.cat(all_conv_weights)
-        global_threshold = torch.quantile(torch.abs(all_weights), prune_rate_conv)
+        
+        # global_threshold = torch.quantile(torch.abs(all_weights), prune_rate_conv)
+
+        # === Fix Start ===
+        # Only count non-zero weights for threshold calculation
+        # non_zero_weights = all_weights[all_weights != 0] 
+        non_zero_weights = all_weights[torch.abs(all_weights) > 1e-8]
+        
+        if len(non_zero_weights) > 0:
+            global_threshold = torch.quantile(torch.abs(non_zero_weights), prune_rate_conv)
+        else:
+            global_threshold = 0.0
+        # === Fixed End ===
         
         # Apply global threshold to each conv layer
         for name, param in conv_params:
@@ -259,7 +273,9 @@ def train_model(
     device: torch.device,
     epochs: int = 1,
     mask: Optional[Dict] = None,
-    verbose: bool = True
+    verbose: bool = True,
+    scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None, # New !
+    test_loader=None # New !
 ) -> List[float]:
     """
     Train model for specified epochs.
@@ -278,12 +294,16 @@ def train_model(
         List of average losses per epoch
     """
     model.train()
-    losses = []
+    # losses = []
+    history = {
+        'train_loss': [],
+        'test_acc': []  
+    }
     
     for epoch in range(epochs):
         running_loss = 0.0
         
-        iterator = tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}") if verbose else train_loader
+        iterator = tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}") if verbose and (epoch + 1) % 10 == 0 else train_loader
         
         for batch_idx, (data, target) in enumerate(iterator):
             data, target = data.to(device), target.to(device)
@@ -301,12 +321,29 @@ def train_model(
             running_loss += loss.item()
         
         avg_loss = running_loss / len(train_loader)
-        losses.append(avg_loss)
+        history['train_loss'].append(avg_loss)
+
+        # --- Validation Step (New!) ---
+        if test_loader is not None:
+            test_loss, test_acc = evaluate_model(model, test_loader, device)
+            history['test_acc'].append(test_acc)
+            model.train() # Set back to train mode
+        else:
+            test_acc = 0.0
         
         if verbose:
-            print(f"Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.4f}")
+        # if verbose and (epoch + 1) % 10 == 0:
+            print(f"Epoch {epoch+1:02d}/{epochs} | Loss: {avg_loss:.4f} | Test Acc: {test_acc:.2f}%")
+            # print(f"Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.4f}")
+
+        # Step the scheduler (if provided) New !
+        if scheduler is not None:
+            scheduler.step()
+            if (epoch + 1) in [56, 57, 71, 72] and verbose:
+                current_lr = optimizer.param_groups[0]['lr']
+                print(f" -> Scheduler Step! Current LR: {current_lr}")
     
-    return losses
+    return history
 
 
 def evaluate_model(
@@ -439,8 +476,31 @@ def iterative_pruning(
         # Step 2: Train the model
         optimizer = optimizer_class(model.parameters(), **optimizer_kwargs)
         criterion = nn.CrossEntropyLoss()
+
+        # === NEW: Setup Scheduler for ResNet-18 ===
+        # ResNet-18 requires specific LR decay at 20k and 25k iterations.
+        # We calculate milestones dynamically based on epochs_per_round.
+        scheduler = None
+
+        # Check if we are running the ResNet-18/-20 config
+        if 'resnet' in config.get('description', '').lower():
+            # Milestone 1: ~20k/30k iterations (2/3 of training)
+            m1 = int(epochs_per_round * 0.66)
+            # Milestone 2: ~25k/30k iterations (5/6 of training)
+            m2 = int(epochs_per_round * 0.83)
+            
+            scheduler = torch.optim.lr_scheduler.MultiStepLR(
+                optimizer, 
+                milestones=[m1, m2], 
+                gamma=0.1
+            )
+            
+            if verbose:
+                print(f"Scheduler enabled: MultiStepLR at epochs {m1} and {m2}")
+
         
-        train_losses = train_model(
+        
+        history = train_model(
             model=model,
             train_loader=train_loader,
             optimizer=optimizer,
@@ -448,6 +508,8 @@ def iterative_pruning(
             device=device,
             epochs=epochs_per_round,
             mask=current_mask,
+            scheduler=scheduler,  # <--- Critical Change (New!)
+            test_loader=test_loader,  # <--- Critical Change (New!)
             verbose=verbose
         )
         
@@ -492,7 +554,7 @@ def iterative_pruning(
             'test_loss': test_loss,
             'remaining_params': remaining_params,
             'remaining_params_pct': remaining_pct,
-            'train_losses': train_losses
+            'history': history
         }
         results.append(result)
         
@@ -572,9 +634,81 @@ def one_shot_pruning(
     return {
         'test_accuracy': test_accuracy,
         'test_loss': test_loss,
-        'remaining_params': count_nonzero_parameters(model, mask),
-        'mask': mask
+        'remaining_params': count_nonzero_parameters(model, mask)
+        # 'mask': mask
     }
+
+
+
+
+def one_shot_pruning_efficient(
+    model: nn.Module,
+    train_loader: torch.utils.data.DataLoader,
+    test_loader: torch.utils.data.DataLoader,
+    optimizer_class: Type[torch.optim.Optimizer],
+    optimizer_kwargs: Dict,
+    target_sparsity: float,  # Percentage to REMOVE (e.g., 0.8)
+    device: torch.device,
+    epochs: int = 86,
+    trained_baseline_state: Optional[Dict] = None,
+    initial_weights_state: Optional[Dict] = None,
+    verbose: bool = True
+) -> Dict:
+    """
+    LTH One-shot pruning: 1. Identify Mask -> 2. Reset -> 3. Retrain.
+    """
+    model = model.to(device)
+
+    # --- Step 1: Generate Mask from Trained Baseline ---
+    if trained_baseline_state is None:
+        raise ValueError("trained_baseline_state is required for one-shot pruning.")
+    
+    model.load_state_dict(trained_baseline_state)
+    
+    # Global magnitude pruning
+    all_weights = torch.cat([p.data.flatten() for n, p in model.named_parameters() if 'weight' in n])
+    threshold = torch.quantile(torch.abs(all_weights), target_sparsity)
+    
+    mask = {n: (torch.abs(p.data) >= threshold).float() 
+            for n, p in model.named_parameters() if 'weight' in n}
+
+    # --- Step 2: Reset to Initial Theta_0 ---
+    if initial_weights_state is None:
+        raise ValueError("initial_weights_state is required to find the winning ticket.")
+        
+    model.load_state_dict(initial_weights_state)
+    
+    # Ensure apply_mask is available in your pruning.py scope
+    apply_mask(model, mask)
+
+    # --- Step 3: Retrain the Sparse Network ---
+    optimizer = optimizer_class(model.parameters(), **optimizer_kwargs)
+    criterion = nn.CrossEntropyLoss()
+    
+    # Standard ResNet scheduler; adjust milestones if using different models
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[56, 71], gamma=0.1)
+    
+    if verbose:
+        print(f"Retraining One-Shot ticket (Remaining: {(1-target_sparsity)*100:.2f}%)...")
+
+    # Ensure train_model is available in your pruning.py scope
+    history = train_model(
+        model, train_loader, optimizer, criterion, device,
+        epochs=epochs, mask=mask, scheduler=scheduler,
+        test_loader=test_loader, verbose=verbose
+    )
+
+    return {
+        # 'remaining_pct': (1.0 - target_sparsity) * 100,
+        'remaining_params_pct': (1.0 - target_sparsity) * 100,     # Match the key ax1 expects
+        'test_accuracy': history['test_acc'][-1],
+        'test_loss': history['train_loss'][-1], # placeholder for loss
+        'remaining_params': count_nonzero_parameters(model, mask), # Use your helper
+        'history': history
+        # 'mask': mask
+    }
+
+
 
 
 def random_reinit_pruning(
