@@ -183,70 +183,174 @@ def create_layerwise_mask(
     return mask
 
 
+# def create_global_mask(
+#     model: nn.Module, 
+#     prune_rate_conv: float
+# ) -> Dict[str, torch.Tensor]:
+#     """
+#     Create pruning mask using global strategy.
+#     All convolutional layers are pruned together based on global magnitude.
+    
+#     This is recommended for deep networks (ResNet, VGG) where layer sizes
+#     vary significantly. It prevents small layers from becoming bottlenecks.
+    
+#     Args:
+#         model: PyTorch model
+#         prune_rate_conv: Global pruning rate for all conv layers
+    
+#     Returns:
+#         Dictionary mapping parameter names to binary masks
+#     """
+#     mask = {}
+    
+#     # Collect all conv layer weights
+#     all_conv_weights = []
+#     conv_params = []
+    
+#     for name, param in model.named_parameters():
+#         if 'weight' not in name:
+#             continue
+        
+#         # if is_conv_layer(name, param) :
+#         # New! Usually the shortcut layer named 'downsample' in ResNet should not be pruned
+#         if is_conv_layer(name, param) and 'downsample' not in name:
+#             all_conv_weights.append(param.data.flatten())
+#             conv_params.append((name, param))
+#         else:
+#             # For non-conv layers, don't prune (typical for ResNet/VGG)
+#             mask[name] = torch.ones_like(param)
+    
+#     # Calculate global threshold across all conv layers
+#     if len(all_conv_weights) > 0 and prune_rate_conv > 0.0:
+#         all_weights = torch.cat(all_conv_weights)
+        
+#         # global_threshold = torch.quantile(torch.abs(all_weights), prune_rate_conv)
+
+#         # === Fix Start ===
+#         # Only count non-zero weights for threshold calculation
+#         # non_zero_weights = all_weights[all_weights != 0] 
+#         non_zero_weights = all_weights[torch.abs(all_weights) > 1e-8]
+        
+#         if len(non_zero_weights) > 0:
+#             global_threshold = torch.quantile(torch.abs(non_zero_weights), prune_rate_conv)
+#         else:
+#             global_threshold = 0.0
+#         # === Fixed End ===
+        
+#         # Apply global threshold to each conv layer
+#         for name, param in conv_params:
+#             mask[name] = (torch.abs(param.data) >= global_threshold).float()
+#     else:
+#         # No pruning
+#         for name, param in conv_params:
+#             mask[name] = torch.ones_like(param)
+    
+#     return mask
+
+
 def create_global_mask(
     model: nn.Module, 
     prune_rate_conv: float
 ) -> Dict[str, torch.Tensor]:
     """
     Create pruning mask using global strategy.
-    All convolutional layers are pruned together based on global magnitude.
     
-    This is recommended for deep networks (ResNet, VGG) where layer sizes
-    vary significantly. It prevents small layers from becoming bottlenecks.
-    
-    Args:
-        model: PyTorch model
-        prune_rate_conv: Global pruning rate for all conv layers
-    
-    Returns:
-        Dictionary mapping parameter names to binary masks
+    CRITICAL FIX: 
+    1. Uses 'named_modules()' to strictly identify nn.Conv2d layers.
+    2. Explicitly protects BatchNorm layers from being pruned.
+    3. Excludes 'downsample' (shortcut) layers for stability in ResNet.
     """
     mask = {}
     
-    # Collect all conv layer weights
-    all_conv_weights = []
-    conv_params = []
-    
+    # 1. Initialization: Set all masks to 1 (keep everything by default)
+    #    This ensures BatchNorm, Biases, and FC layers are safe initially.
     for name, param in model.named_parameters():
-        if 'weight' not in name:
-            continue
+        mask[name] = torch.ones_like(param)
+
+    # Collect weights that we actually WANT to prune (only Conv2d weights)
+    all_conv_weights = []
+    # Store tuples of (full_param_name, parameter_tensor) for applying mask later
+    conv_params_to_prune = []
+
+    # 2. Iterate through modules to safely identify layer types
+    for module_name, module in model.named_modules():
         
-        # if is_conv_layer(name, param) :
-        # New! Usually the shortcut layer named 'downsample' in ResNet should not be pruned
-        if is_conv_layer(name, param) and 'downsample' not in name:
-            all_conv_weights.append(param.data.flatten())
-            conv_params.append((name, param))
-        else:
-            # For non-conv layers, don't prune (typical for ResNet/VGG)
-            mask[name] = torch.ones_like(param)
-    
-    # Calculate global threshold across all conv layers
+        # Check if it is a Convolutional layer
+        if isinstance(module, nn.Conv2d):
+            
+            # Exclusion 1: Skip ResNet 'downsample' (shortcut) layers
+            # Pruning shortcuts can cause dimension mismatch issues
+            if 'downsample' in module_name:
+                continue
+            
+            # Construct the full parameter name for the weight
+            # e.g., module_name="layer1.0.conv1" -> param_name="layer1.0.conv1.weight"
+            weight_name = f"{module_name}.weight"
+            
+            # Safety check: ensure this parameter actually exists
+            if hasattr(module, 'weight') and module.weight is not None:
+                param = module.weight
+                
+                # Add to collection for threshold calculation
+                all_conv_weights.append(param.data.flatten())
+                conv_params_to_prune.append((weight_name, param))
+
+    # 3. Calculate Global Threshold
     if len(all_conv_weights) > 0 and prune_rate_conv > 0.0:
+        # Concatenate all collected weights into one giant vector
         all_weights = torch.cat(all_conv_weights)
         
-        # global_threshold = torch.quantile(torch.abs(all_weights), prune_rate_conv)
-
-        # === Fix Start ===
-        # Only count non-zero weights for threshold calculation
-        # non_zero_weights = all_weights[all_weights != 0] 
+        # === Zero-Weight Fix (Iterative Pruning) ===
+        # We must ignore weights that are already zero (pruned in previous rounds)
+        # Otherwise, the quantile will be skewed by zeros.
         non_zero_weights = all_weights[torch.abs(all_weights) > 1e-8]
         
         if len(non_zero_weights) > 0:
             global_threshold = torch.quantile(torch.abs(non_zero_weights), prune_rate_conv)
         else:
             global_threshold = 0.0
-        # === Fixed End ===
-        
-        # Apply global threshold to each conv layer
-        for name, param in conv_params:
+            
+        # 4. Apply Threshold
+        for name, param in conv_params_to_prune:
+            # Create binary mask: 1 if abs(weight) >= threshold, else 0
             mask[name] = (torch.abs(param.data) >= global_threshold).float()
-    else:
-        # No pruning
-        for name, param in conv_params:
-            mask[name] = torch.ones_like(param)
-    
+            
     return mask
 
+
+# ============================================================================
+# Random Sparse Experiment (For Figure 1 Baseline)
+# ============================================================================
+
+def create_random_mask(
+    model: nn.Module, 
+    prune_rate: float
+) -> Dict[str, torch.Tensor]:
+    """
+    Create a random pruning mask (randomly remove p% of weights).
+    The structure is random, independent of weight magnitude.
+    """
+    mask = {}
+    
+    for name, param in model.named_parameters():
+        if 'weight' not in name:
+            continue
+        
+        # Skip if prune_rate is 0 or invalid
+        if prune_rate <= 0.0:
+            mask[name] = torch.ones_like(param)
+            continue
+            
+        # Generate random noise with same shape as param
+        rand_tensor = torch.rand_like(param.data)
+        
+        # Calculate threshold to prune lowest p% of the random values
+        threshold = torch.quantile(rand_tensor, prune_rate)
+        
+        # Create mask: 1 = keep, 0 = prune
+        mask[name] = (rand_tensor >= threshold).float()
+    
+    return mask
 
 def apply_mask(model: nn.Module, mask: Dict[str, torch.Tensor]):
     """
@@ -265,6 +369,87 @@ def apply_mask(model: nn.Module, mask: Dict[str, torch.Tensor]):
 # Training Helper
 # ============================================================================
 
+# def train_model(
+#     model: nn.Module,
+#     train_loader: torch.utils.data.DataLoader,
+#     optimizer: torch.optim.Optimizer,
+#     criterion: nn.Module,
+#     device: torch.device,
+#     epochs: int = 1,
+#     mask: Optional[Dict] = None,
+#     verbose: bool = True,
+#     scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None, # New !
+#     test_loader=None # New !
+# ) -> List[float]:
+#     """
+#     Train model for specified epochs.
+    
+#     Args:
+#         model: PyTorch model
+#         train_loader: Training data loader
+#         optimizer: Optimizer
+#         criterion: Loss function
+#         device: Device to train on
+#         epochs: Number of epochs
+#         mask: Optional pruning mask to apply after each step
+#         verbose: Whether to print progress
+    
+#     Returns:
+#         List of average losses per epoch
+#     """
+#     model.train()
+#     # losses = []
+#     history = {
+#         'train_loss': [],
+#         'test_acc': []  
+#     }
+    
+#     for epoch in range(epochs):
+#         running_loss = 0.0
+        
+#         iterator = tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}") if verbose and (epoch + 1) % 10 == 0 else train_loader
+        
+#         for batch_idx, (data, target) in enumerate(iterator):
+#             data, target = data.to(device), target.to(device)
+            
+#             optimizer.zero_grad()
+#             output = model(data)
+#             loss = criterion(output, target)
+#             loss.backward()
+#             optimizer.step()
+            
+#             # Apply mask after gradient step (if pruned)
+#             if mask is not None:
+#                 apply_mask(model, mask)
+            
+#             running_loss += loss.item()
+        
+#         avg_loss = running_loss / len(train_loader)
+#         history['train_loss'].append(avg_loss)
+
+#         # --- Validation Step (New!) ---
+#         if test_loader is not None:
+#             test_loss, test_acc = evaluate_model(model, test_loader, device)
+#             history['test_acc'].append(test_acc)
+#             model.train() # Set back to train mode
+#         else:
+#             test_acc = 0.0
+        
+#         if verbose:
+#         # if verbose and (epoch + 1) % 10 == 0:
+#             print(f"Epoch {epoch+1:02d}/{epochs} | Loss: {avg_loss:.4f} | Test Acc: {test_acc:.2f}%")
+#             # print(f"Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.4f}")
+
+#         # Step the scheduler (if provided) New !
+#         if scheduler is not None:
+#             scheduler.step()
+#             if (epoch + 1) in [56, 57, 71, 72] and verbose:
+#                 current_lr = optimizer.param_groups[0]['lr']
+#                 print(f" -> Scheduler Step! Current LR: {current_lr}")
+    
+#     return history
+
+
 def train_model(
     model: nn.Module,
     train_loader: torch.utils.data.DataLoader,
@@ -274,75 +459,151 @@ def train_model(
     epochs: int = 1,
     mask: Optional[Dict] = None,
     verbose: bool = True,
-    scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None, # New !
-    test_loader=None # New !
-) -> List[float]:
-    """
-    Train model for specified epochs.
+    scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
+    val_loader: Optional[torch.utils.data.DataLoader] = None,
+    test_loader: Optional[torch.utils.data.DataLoader] = None,
+    patience: int = 10,
+    min_delta: float = 0.001
+) -> Dict:
     
-    Args:
-        model: PyTorch model
-        train_loader: Training data loader
-        optimizer: Optimizer
-        criterion: Loss function
-        device: Device to train on
-        epochs: Number of epochs
-        mask: Optional pruning mask to apply after each step
-        verbose: Whether to print progress
-    
-    Returns:
-        List of average losses per epoch
-    """
     model.train()
-    # losses = []
+    
+    # 记录详细历史用于分析
     history = {
         'train_loss': [],
-        'test_acc': []  
+        'val_loss': [],
+        'test_acc': [],
+        'early_stop_epoch': None, # 哪一个 Epoch 触发的
+        'early_stop_iter': None,  # [New] 哪一个 Iteration 触发的 (Figure 1 需要)
+        'early_stop_test_acc': None, # [New] 触发时的 Test Acc (Figure 1 需要)
+        'early_stop_val_acc': None   # [New] 触发时的 Val Acc (备用)
     }
+    
+    # Early Stop 追踪变量
+    best_val_loss = float('inf')
+    patience_counter = 0
+    early_stop_triggered = False
+    
+    # [New] 计算每个 Epoch 有多少个 Iteration (Steps)
+    steps_per_epoch = len(train_loader)
     
     for epoch in range(epochs):
         running_loss = 0.0
         
+        # 1. Training Loop
         iterator = tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}") if verbose and (epoch + 1) % 10 == 0 else train_loader
         
-        for batch_idx, (data, target) in enumerate(iterator):
+        for data, target in iterator:
             data, target = data.to(device), target.to(device)
-            
             optimizer.zero_grad()
             output = model(data)
             loss = criterion(output, target)
             loss.backward()
             optimizer.step()
             
-            # Apply mask after gradient step (if pruned)
             if mask is not None:
                 apply_mask(model, mask)
             
             running_loss += loss.item()
         
-        avg_loss = running_loss / len(train_loader)
-        history['train_loss'].append(avg_loss)
+        avg_train_loss = running_loss / len(train_loader)
+        history['train_loss'].append(avg_train_loss)
 
-        # --- Validation Step (New!) ---
-        if test_loader is not None:
-            test_loss, test_acc = evaluate_model(model, test_loader, device)
-            history['test_acc'].append(test_acc)
-            model.train() # Set back to train mode
-        else:
-            test_acc = 0.0
+        # 2. Evaluation & Early Stop Logic
+        current_val_loss = 0.0
+        current_val_acc = 0.0 # 需要记录 Val Acc 吗？
+        current_test_acc = 0.0
         
-        if verbose:
-        # if verbose and (epoch + 1) % 10 == 0:
-            print(f"Epoch {epoch+1:02d}/{epochs} | Loss: {avg_loss:.4f} | Test Acc: {test_acc:.2f}%")
-            # print(f"Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.4f}")
+        # 先做评估
+        if val_loader:
+            current_val_loss, current_val_acc = evaluate_model(model, val_loader, device)
+            history['val_loss'].append(current_val_loss)
+            
+        if test_loader:
+            _, current_test_acc = evaluate_model(model, test_loader, device)
+            history['test_acc'].append(current_test_acc)
+            
+        model.train() # 切换回训练模式
 
-        # Step the scheduler (if provided) New !
+        # # 3. 检查 Early Stop (Shadow Mode)
+        # # 我们只在 val_loader 存在时才检查
+        # if val_loader and not early_stop_triggered:
+        #     # 检查 Loss 是否下降
+        #     if current_val_loss < (best_val_loss - min_delta):
+        #         best_val_loss = current_val_loss
+        #         patience_counter = 0
+        #     else:
+        #         patience_counter += 1
+            
+        #     # 触发判断
+        #     if patience_counter >= patience:
+        #         early_stop_triggered = True
+                
+        #         # [Important] 记录 Figure 1 所需的关键数据
+        #         history['early_stop_epoch'] = epoch + 1
+        #         history['early_stop_iter'] = (epoch + 1) * steps_per_epoch # 转换为 Iterations
+        #         history['early_stop_test_acc'] = current_test_acc # 记录此时的 Test Acc
+        #         history['early_stop_val_acc'] = current_val_acc
+                
+        #         if verbose:
+        #             print(f"   [Tracker] 🚩 Early Stop Condition at Iter {history['early_stop_iter']} "
+        #                   f"(Test Acc: {current_test_acc:.2f}%)")
+                    
+        # 3. 检查 Early Stop (Shadow Mode)
+        # 我们只在 val_loader 存在时才检查
+        if val_loader and not early_stop_triggered:
+            
+            # === [关键修改 START] ===
+            # 热身保护：在前 50 个 Epoch，由于 LR=0.1 导致 Loss 震荡剧烈，
+            # 我们强制不计算 Patience，避免 Tracker 被噪音误导而过早触发。
+            # ResNet 通常在 Epoch 56 第一次衰减 LR，真正的收敛发生在那之后。
+            if epoch < 50:
+                patience_counter = 0 # 强制清零，保持“满血”状态
+                # 依然更新 best_val_loss，防止 decay 后的 loss 比初期还高（虽然不太可能）
+                if current_val_loss < best_val_loss:
+                    best_val_loss = current_val_loss
+            
+            # 正常逻辑：Epoch 50 之后开始严查
+            else:
+                # 检查 Loss 是否下降
+                if current_val_loss < (best_val_loss - min_delta):
+                    best_val_loss = current_val_loss
+                    patience_counter = 0
+                else:
+                    patience_counter += 1
+                
+                # 触发判断
+                if patience_counter >= patience:
+                    early_stop_triggered = True
+                    
+                    history['early_stop_epoch'] = epoch + 1
+                    history['early_stop_iter'] = (epoch + 1) * steps_per_epoch
+                    history['early_stop_test_acc'] = current_test_acc 
+                    history['early_stop_val_acc'] = current_val_acc
+                    
+                    if verbose:
+                        print(f"   [Tracker] 🚩 Early Stop Condition at Iter {history['early_stop_iter']} "
+                              f"(Epoch {epoch+1}, Test Acc: {current_test_acc:.2f}%)")
+             # === [关键修改 END] ===
+
+        # 4. Logging & Scheduler
+        if verbose:
+             print(f"Epoch {epoch+1:02d} | Train Loss: {avg_train_loss:.4f} | Val Loss: {current_val_loss:.4f} | Val Acc: {current_val_acc:.2f}% | Test Acc: {current_test_acc:.2f}%")
+
         if scheduler is not None:
             scheduler.step()
             if (epoch + 1) in [56, 57, 71, 72] and verbose:
                 current_lr = optimizer.param_groups[0]['lr']
                 print(f" -> Scheduler Step! Current LR: {current_lr}")
     
+    # 如果跑完了所有 Epoch 还没触发 Early Stop，
+    # 通常取最后一个 Epoch 的数据作为 "Early Stop" 点 (或者视为没有收敛)
+    # 论文中通常指 "Iterations to reach early-stopping criteria"，如果没达到，可能取最大值。
+    if not early_stop_triggered and val_loader:
+        history['early_stop_epoch'] = epochs
+        history['early_stop_iter'] = epochs * steps_per_epoch
+        history['early_stop_test_acc'] = history['test_acc'][-1] if history['test_acc'] else 0.0
+        
     return history
 
 
@@ -395,6 +656,7 @@ def iterative_pruning(
     model: nn.Module,
     train_loader: torch.utils.data.DataLoader,
     test_loader: torch.utils.data.DataLoader,
+    val_loader: Optional[torch.utils.data.DataLoader],
     optimizer_class: type,
     optimizer_kwargs: Dict,
     device: torch.device,
@@ -448,6 +710,11 @@ def iterative_pruning(
             'prune_rate_fc': 0.2,
             'pruning_strategy': 'layerwise'
         }
+
+    # === New ===
+    config['optimizer_kwargs'] = optimizer_kwargs
+    config['epochs_per_round'] = epochs_per_round
+    config['n_rounds'] = n_rounds
     
     model = model.to(device)
     
@@ -510,6 +777,7 @@ def iterative_pruning(
             mask=current_mask,
             scheduler=scheduler,  # <--- Critical Change (New!)
             test_loader=test_loader,  # <--- Critical Change (New!)
+            val_loader=val_loader,  # <--- Critical Change (New!)
             verbose=verbose
         )
         
@@ -554,7 +822,8 @@ def iterative_pruning(
             'test_loss': test_loss,
             'remaining_params': remaining_params,
             'remaining_params_pct': remaining_pct,
-            'history': history
+            'history': history,
+            'mask': copy.deepcopy(current_mask)
         }
         results.append(result)
         
@@ -710,7 +979,6 @@ def one_shot_pruning_efficient(
 
 
 
-
 def random_reinit_pruning(
     model: nn.Module,
     train_loader: torch.utils.data.DataLoader,
@@ -719,32 +987,22 @@ def random_reinit_pruning(
     optimizer_kwargs: Dict,
     device: torch.device,
     mask: Dict[str, torch.Tensor],
+    val_loader: Optional[torch.utils.data.DataLoader] = None, # [新增] 保持接口一致
     epochs: int = 50,
     verbose: bool = True
 ) -> Dict:
     """
-    Random reinitialization pruning (baseline for comparison).
-    
-    Instead of resetting to original θ₀, randomly reinitialize.
-    This should perform worse than iterative pruning (winning ticket).
-    
-    Args:
-        model: PyTorch model
-        train_loader: Training data loader
-        test_loader: Test data loader
-        optimizer_class: Optimizer class
-        optimizer_kwargs: Optimizer arguments
-        device: Device to train on
-        mask: Pruning mask from iterative pruning
-        epochs: Training epochs
-        verbose: Whether to print progress
-    
-    Returns:
-        Dictionary with results
+    Random reinitialization pruning (Control Experiment).
+    Returns a dictionary structure identical to one item in the iterative_pruning results list.
     """
     model = model.to(device)
     
-    # Randomly reinitialize
+    # 0. Calculate total parameters (before applying mask, to get denominator)
+    # We assume the model structure passed in is the full structure
+    total_params = sum(p.numel() for p in model.parameters())
+
+    # 1. Randomly reinitialize (Using Xavier/Glorot as discussed for ResNet)
+    # 确保这里和你的 _weights_init 逻辑一致
     def init_weights(m):
         if isinstance(m, (nn.Conv2d, nn.Linear)):
             nn.init.xavier_normal_(m.weight)
@@ -752,21 +1010,254 @@ def random_reinit_pruning(
                 nn.init.constant_(m.bias, 0)
     
     model.apply(init_weights)
+    
+    # 2. Apply Mask (Structure)
     apply_mask(model, mask)
     
+    # Calculate sparsity stats
+    remaining_params = count_nonzero_parameters(model, mask)
+    remaining_pct = 100.0 * remaining_params / total_params
+
     if verbose:
-        print("Random Reinitialization Pruning: Training...")
+        print("\n" + "=" * 70)
+        print(f"Starting Random Reinit Control Experiment")
+        print(f"Sparsity Level: {remaining_pct:.2f}% weights remaining")
+        print("=" * 70)
     
-    # Train
+    # 3. Setup Optimizer & Scheduler
     optimizer = optimizer_class(model.parameters(), **optimizer_kwargs)
     criterion = nn.CrossEntropyLoss()
-    train_model(model, train_loader, optimizer, criterion, device, epochs, mask, verbose)
+
+    scheduler = None
+    if epochs > 0:
+        # Match the scheduler logic from iterative_pruning exactly
+        m1 = int(epochs * 0.66)
+        m2 = int(epochs * 0.83)
+        scheduler = torch.optim.lr_scheduler.MultiStepLR(
+            optimizer, milestones=[m1, m2], gamma=0.1
+        )
+        if verbose:
+            print(f"Scheduler enabled: MultiStepLR at epochs {m1} and {m2}")
+
+    # 4. Train
+    # Capture the history return value!
+    history = train_model(
+        model=model,
+        train_loader=train_loader,
+        optimizer=optimizer,
+        criterion=criterion,
+        device=device,
+        epochs=epochs,
+        mask=mask,
+        scheduler=scheduler,
+        test_loader=test_loader,
+        val_loader=val_loader,
+        verbose=verbose
+    )
     
-    # Evaluate
+    # 5. Evaluate Final Performance
     test_loss, test_accuracy = evaluate_model(model, test_loader, device)
     
+    if verbose:
+        print(f"\nRandom Reinit Result:")
+        print(f"  Test Accuracy: {test_accuracy:.2f}%")
+        print(f"  Remaining Params: {remaining_pct:.2f}%")
+        print("=" * 70 + "\n")
+    
+    # 6. Return Data (Matching iterative_pruning structure)
     return {
-        'test_accuracy': test_accuracy,
+        'test_accuracy': test_accuracy,       # 最终精度 (用于画点)
         'test_loss': test_loss,
-        'remaining_params': count_nonzero_parameters(model, mask)
+        'remaining_params': remaining_params,
+        'remaining_params_pct': remaining_pct, # 横坐标 (X-axis)
+        'history': history,                   # 训练曲线 (包含每个epoch的acc, 用于画过程)
+        'mask': None # Random Reinit 不需要存 mask，省点内存，如果需要可以存 mask
     }
+
+# def random_reinit_pruning(
+#     model: nn.Module,
+#     train_loader: torch.utils.data.DataLoader,
+#     test_loader: torch.utils.data.DataLoader,
+#     optimizer_class: type,
+#     optimizer_kwargs: Dict,
+#     device: torch.device,
+#     mask: Dict[str, torch.Tensor],
+#     epochs: int = 50,
+#     verbose: bool = True
+# ) -> Dict:
+#     """
+#     Random reinitialization pruning (baseline for comparison).
+    
+#     Instead of resetting to original θ₀, randomly reinitialize.
+#     This should perform worse than iterative pruning (winning ticket).
+    
+#     Args:
+#         model: PyTorch model
+#         train_loader: Training data loader
+#         test_loader: Test data loader
+#         optimizer_class: Optimizer class
+#         optimizer_kwargs: Optimizer arguments
+#         device: Device to train on
+#         mask: Pruning mask from iterative pruning
+#         epochs: Training epochs
+#         verbose: Whether to print progress
+    
+#     Returns:
+#         Dictionary with results
+#     """
+#     model = model.to(device)
+    
+#     # Randomly reinitialize
+#     def init_weights(m):
+#         if isinstance(m, (nn.Conv2d, nn.Linear)):
+#             nn.init.xavier_normal_(m.weight)
+#             if m.bias is not None:
+#                 nn.init.constant_(m.bias, 0)
+    
+#     model.apply(init_weights)
+#     apply_mask(model, mask)
+    
+#     if verbose:
+#         print("Random Reinitialization Pruning: Training...")
+    
+#     # Train
+#     optimizer = optimizer_class(model.parameters(), **optimizer_kwargs)
+#     criterion = nn.CrossEntropyLoss()
+
+
+#     # 3. Setup Scheduler (Critical for ResNet comparison)
+#     scheduler = None
+#     # 简单复用 iterative_pruning 里的逻辑
+#     m1 = int(epochs * 0.66)
+#     m2 = int(epochs * 0.83)
+#     scheduler = torch.optim.lr_scheduler.MultiStepLR(
+#         optimizer, milestones=[m1, m2], gamma=0.1
+#     )
+
+#     train_model(model, train_loader, test_loader, optimizer, criterion, scheduler=scheduler, device=device, epochs=epochs, mask=mask, verbose=verbose)
+    
+#     # Evaluate
+#     test_loss, test_accuracy = evaluate_model(model, test_loader, device)
+    
+#     return {
+#         'test_accuracy': test_accuracy,
+#         'test_loss': test_loss,
+#         'remaining_params': count_nonzero_parameters(model, mask)
+#     }
+
+
+def random_sparse_pruning(
+    model: nn.Module,
+    train_loader: torch.utils.data.DataLoader,
+    test_loader: torch.utils.data.DataLoader,
+    val_loader: torch.utils.data.DataLoader,
+    optimizer_class: type,
+    optimizer_kwargs: Dict,
+    device: torch.device,
+    sparsity_levels: List[float],
+    n_trials: int = 3,
+    epochs: int = 86,
+    verbose: bool = True
+) -> Dict[float, List[Dict]]:
+    """
+    Run Random Sparse Network experiment (Baseline for Figure 1).
+    """
+    results = {} # format: {sparsity_float: [trial_dict_1, trial_dict_2...]}
+    
+    model = model.to(device)
+    
+    # 1. Get Initial Param Count (Denominator for percentage calculation)
+    # This ensures consistency with iterative_pruning
+    initial_params = count_parameters(model)
+    
+    if verbose:
+        print("\n" + "="*70)
+        print("RUNNING EXPERIMENT: RANDOM SPARSE NETWORKS")
+        print(f"Sparsity Levels: {sparsity_levels}")
+        print(f"Trials per level: {n_trials}")
+        print(f"Total Params: {initial_params:,}")
+        print("="*70)
+
+    for sparsity in sparsity_levels:
+        results[sparsity] = []
+        
+        for trial in range(n_trials):
+            if verbose:
+                print(f"\n[Sparsity {sparsity:.2f} | Trial {trial+1}/{n_trials}]")
+            
+            # 2. Randomly Reinitialize Model (Weights)
+            # Must re-init weights for "Random Sparse" baseline (Control Group)
+            def init_weights(m):
+                if isinstance(m, (nn.Conv2d, nn.Linear)):
+                    nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                    if m.bias is not None:
+                        nn.init.constant_(m.bias, 0)
+            model.apply(init_weights)
+            
+            # 3. Create & Apply Random Mask (Structure)
+            # Pruning rate = sparsity (e.g., 0.2 means remove 20%)
+            mask = create_random_mask(model, prune_rate=sparsity)
+            apply_mask(model, mask)
+            
+            # 4. Calculate Stats (Strictly mimicking iterative_pruning)
+            remaining_params = count_nonzero_parameters(model, mask)
+            remaining_pct = 100.0 * remaining_params / initial_params
+            
+            if verbose:
+                 print(f" -> Structure created. Remaining: {remaining_params:,} ({remaining_pct:.2f}%)")
+
+            # 5. Setup Optimizer & Scheduler (ResNet specific)
+            optimizer = optimizer_class(model.parameters(), **optimizer_kwargs)
+            criterion = nn.CrossEntropyLoss()
+            
+            scheduler = None
+            # ResNet-18/20 standard milestones (approx 2/3 and 5/6 of training)
+            m1 = int(epochs * 0.66)
+            m2 = int(epochs * 0.83)
+            scheduler = torch.optim.lr_scheduler.MultiStepLR(
+                optimizer, milestones=[m1, m2], gamma=0.1
+            )
+            
+            # 6. Train with Early Stop Tracking
+            # The history dict returned here contains 'early_stop_iter' etc.
+            history = train_model(
+                model=model,
+                train_loader=train_loader,
+                val_loader=val_loader,
+                test_loader=test_loader,
+                optimizer=optimizer,
+                criterion=criterion,
+                device=device,
+                epochs=epochs,
+                mask=mask,
+                scheduler=scheduler,
+                verbose=verbose
+            )
+            
+            # 7. Collect Result (Format aligned with iterative_pruning)
+            # using the final accuracy from history for consistency
+            final_test_acc = history['test_acc'][-1] if history['test_acc'] else 0.0
+            
+            trial_result = {
+                # Standard Keys (Match iterative_pruning)
+                'round': f"Sparsity {sparsity:.2f}", # Placeholder
+                'test_accuracy': final_test_acc,
+                'remaining_params': remaining_params,
+                'remaining_params_pct': remaining_pct, # Matches X-axis logic
+                'history': history,
+                # 'mask': mask, # Optional: Don't save mask to save disk space for random trials
+                
+                # Figure 1 Specific Keys (extracted from history)
+                'early_stop_iter': history['early_stop_iter'],
+                'early_stop_test_acc': history['early_stop_test_acc'],
+                'early_stop_epoch': history['early_stop_epoch']
+            }
+            
+            results[sparsity].append(trial_result)
+            
+            if verbose:
+                print(f" -> Done. Early Stop Iter: {trial_result['early_stop_iter']} | "
+                      f"Stop Acc: {trial_result['early_stop_test_acc']:.2f}% | "
+                      f"Final Acc: {final_test_acc:.2f}%")
+                
+    return results
