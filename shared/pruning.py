@@ -52,6 +52,13 @@ PRUNING_CONFIGS = {
         'pruning_strategy': 'global',  # Use global pruning for deep networks
         'description': 'ResNet-18 for CIFAR-10'
     },
+    'resnet20': {
+        'prune_rate_conv': 0.2, # ResNet 使用全局剪枝，通常 20%
+        'prune_rate_fc': 0.0,   # 论文中 ResNet 不剪 FC 层 [cite: 86]
+        'pruning_strategy': 'global', # 记得 ResNet 是全局剪枝
+        'warmup_strategy': 'linear_20k', # <--- 激活上面写的逻辑
+        'description': 'ResNet-20 LR=0.03 Warmup=20k'
+    },
 }
 
 
@@ -749,8 +756,45 @@ def iterative_pruning(
         # We calculate milestones dynamically based on epochs_per_round.
         scheduler = None
 
+        # === 定义 Rate 0.03 + Warmup 20k 的特殊 Scheduler ===
+        if config.get('warmup_strategy') == 'linear_20k':
+            # 假设总 epochs = 86 (对应 30k iters)
+            # Warmup 持续到第 57 epoch (对应 20k iters)
+            # Decay 在第 71 epoch (对应 25k iters)
+
+            # warmup_epochs = int(epochs_per_round * 0.66)  # 对应 20k iterations
+            # decay_epoch = int(epochs_per_round * 0.83)    # 对应 25k iterations
+
+            warmup_epochs = int(epochs_per_round * 2 / 3)
+            decay_epoch = int(epochs_per_round * 5 / 6)
+            
+            def lr_lambda(current_epoch, warmup_epochs=warmup_epochs, decay_epoch=decay_epoch):
+                # warmup_epochs = int(epochs_per_round * 0.66)  # 对应 20k iterations
+                # decay_epoch = int(epochs_per_round * 0.83)    # 对应 25k iterations
+                
+                if current_epoch < warmup_epochs:
+                    # 线性热身：从 0 增加到 1.0 (即 1.0 * base_lr 0.03)
+                    # 为了避免除以0，加一个小 epsilon 或者从第一步开始
+                    return float(current_epoch + 1) / warmup_epochs
+                elif current_epoch < decay_epoch:
+                    # 第一次衰减区间：20k - 25k iters
+                    # 此时 LR 应该是 0.003，相对于 base 0.03 就是 0.1 倍
+                    return 0.1
+                else:
+                    # 第二次衰减区间：25k+ iters
+                    # 此时 LR 应该是 0.0003，相对于 base 0.03 就是 0.01 倍
+                    return 0.01
+
+            scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
+            
+            if verbose:
+                # print("Scheduler enabled: Linear Warmup to epoch 57, then decay.")
+                print(f"Scheduler enabled: Linear Warmup to epoch {warmup_epochs}, then decay.")
+
+        # ... 原有的 ResNet scheduler 逻辑 ...
+        elif 'resnet' in config.get('description', '').lower():
         # Check if we are running the ResNet-18/-20 config
-        if 'resnet' in config.get('description', '').lower():
+        # if 'resnet' in config.get('description', '').lower():
             # Milestone 1: ~20k/30k iterations (2/3 of training)
             m1 = int(epochs_per_round * 0.66)
             # Milestone 2: ~25k/30k iterations (5/6 of training)
@@ -906,8 +950,6 @@ def one_shot_pruning(
         'remaining_params': count_nonzero_parameters(model, mask)
         # 'mask': mask
     }
-
-
 
 
 def one_shot_pruning_efficient(
@@ -1074,76 +1116,6 @@ def random_reinit_pruning(
         'mask': None # Random Reinit 不需要存 mask，省点内存，如果需要可以存 mask
     }
 
-# def random_reinit_pruning(
-#     model: nn.Module,
-#     train_loader: torch.utils.data.DataLoader,
-#     test_loader: torch.utils.data.DataLoader,
-#     optimizer_class: type,
-#     optimizer_kwargs: Dict,
-#     device: torch.device,
-#     mask: Dict[str, torch.Tensor],
-#     epochs: int = 50,
-#     verbose: bool = True
-# ) -> Dict:
-#     """
-#     Random reinitialization pruning (baseline for comparison).
-    
-#     Instead of resetting to original θ₀, randomly reinitialize.
-#     This should perform worse than iterative pruning (winning ticket).
-    
-#     Args:
-#         model: PyTorch model
-#         train_loader: Training data loader
-#         test_loader: Test data loader
-#         optimizer_class: Optimizer class
-#         optimizer_kwargs: Optimizer arguments
-#         device: Device to train on
-#         mask: Pruning mask from iterative pruning
-#         epochs: Training epochs
-#         verbose: Whether to print progress
-    
-#     Returns:
-#         Dictionary with results
-#     """
-#     model = model.to(device)
-    
-#     # Randomly reinitialize
-#     def init_weights(m):
-#         if isinstance(m, (nn.Conv2d, nn.Linear)):
-#             nn.init.xavier_normal_(m.weight)
-#             if m.bias is not None:
-#                 nn.init.constant_(m.bias, 0)
-    
-#     model.apply(init_weights)
-#     apply_mask(model, mask)
-    
-#     if verbose:
-#         print("Random Reinitialization Pruning: Training...")
-    
-#     # Train
-#     optimizer = optimizer_class(model.parameters(), **optimizer_kwargs)
-#     criterion = nn.CrossEntropyLoss()
-
-
-#     # 3. Setup Scheduler (Critical for ResNet comparison)
-#     scheduler = None
-#     # 简单复用 iterative_pruning 里的逻辑
-#     m1 = int(epochs * 0.66)
-#     m2 = int(epochs * 0.83)
-#     scheduler = torch.optim.lr_scheduler.MultiStepLR(
-#         optimizer, milestones=[m1, m2], gamma=0.1
-#     )
-
-#     train_model(model, train_loader, test_loader, optimizer, criterion, scheduler=scheduler, device=device, epochs=epochs, mask=mask, verbose=verbose)
-    
-#     # Evaluate
-#     test_loss, test_accuracy = evaluate_model(model, test_loader, device)
-    
-#     return {
-#         'test_accuracy': test_accuracy,
-#         'test_loss': test_loss,
-#         'remaining_params': count_nonzero_parameters(model, mask)
-#     }
 
 
 def random_sparse_pruning(
