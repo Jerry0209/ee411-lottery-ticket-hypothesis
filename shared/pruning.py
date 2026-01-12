@@ -796,9 +796,11 @@ def iterative_pruning(
         # Check if we are running the ResNet-18/-20 config
         # if 'resnet' in config.get('description', '').lower():
             # Milestone 1: ~20k/30k iterations (2/3 of training)
-            m1 = int(epochs_per_round * 0.66)
+            # m1 = int(epochs_per_round * 0.66)
+            m1 = int(epochs_per_round * 2 / 3)
             # Milestone 2: ~25k/30k iterations (5/6 of training)
-            m2 = int(epochs_per_round * 0.83)
+            # m2 = int(epochs_per_round * 0.83)
+            m2 = int(epochs_per_round * 5 / 6)
             
             scheduler = torch.optim.lr_scheduler.MultiStepLR(
                 optimizer, 
