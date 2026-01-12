@@ -13,10 +13,10 @@ venv/
 
 # Experiment Results
 # Large model files (don't upload)
-results/checkpoints/*.pth
-results/checkpoints/*.pt
-*.pth
-*.pt
+# results/checkpoints/*.pth
+# results/checkpoints/*.pt
+# *.pth
+# *.pt
 
 # Downloaded Dataset (don't upload)
 data/
