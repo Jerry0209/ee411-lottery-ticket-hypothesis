@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
+import random
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -130,3 +131,19 @@ def plot_loss(losses, ylim=None):
     plt.ylabel("Loss")
     plt.ylim(ylim)
     plt.title("Loss progression across epochs")
+
+
+
+def set_seed(seed):
+    """
+    Docstring for set_seed
+    This function sets random seeds to produce multiple trials for each experiment.
+    
+    :param seed: int: The seed value to set for random number generators.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    print(f"\nSeed set to: {seed}")

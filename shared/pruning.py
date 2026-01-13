@@ -53,10 +53,10 @@ PRUNING_CONFIGS = {
         'description': 'ResNet-18 for CIFAR-10'
     },
     'resnet20': {
-        'prune_rate_conv': 0.2, # ResNet 使用全局剪枝，通常 20%
-        'prune_rate_fc': 0.0,   # 论文中 ResNet 不剪 FC 层 [cite: 86]
-        'pruning_strategy': 'global', # 记得 ResNet 是全局剪枝
-        'warmup_strategy': 'linear_20k', # <--- 激活上面写的逻辑
+        'prune_rate_conv': 0.2, # ResNet uses global pruning, typically 20%
+        'prune_rate_fc': 0.0,   # ResNet does not prune FC layers in the paper
+        'pruning_strategy': 'global', # Remember ResNet uses global pruning
+        'warmup_strategy': 'linear_20k', # <--- Enable the logic written above
         'description': 'ResNet-20 LR=0.03 Warmup=20k'
     },
 }
@@ -190,71 +190,6 @@ def create_layerwise_mask(
     return mask
 
 
-# def create_global_mask(
-#     model: nn.Module, 
-#     prune_rate_conv: float
-# ) -> Dict[str, torch.Tensor]:
-#     """
-#     Create pruning mask using global strategy.
-#     All convolutional layers are pruned together based on global magnitude.
-    
-#     This is recommended for deep networks (ResNet, VGG) where layer sizes
-#     vary significantly. It prevents small layers from becoming bottlenecks.
-    
-#     Args:
-#         model: PyTorch model
-#         prune_rate_conv: Global pruning rate for all conv layers
-    
-#     Returns:
-#         Dictionary mapping parameter names to binary masks
-#     """
-#     mask = {}
-    
-#     # Collect all conv layer weights
-#     all_conv_weights = []
-#     conv_params = []
-    
-#     for name, param in model.named_parameters():
-#         if 'weight' not in name:
-#             continue
-        
-#         # if is_conv_layer(name, param) :
-#         # New! Usually the shortcut layer named 'downsample' in ResNet should not be pruned
-#         if is_conv_layer(name, param) and 'downsample' not in name:
-#             all_conv_weights.append(param.data.flatten())
-#             conv_params.append((name, param))
-#         else:
-#             # For non-conv layers, don't prune (typical for ResNet/VGG)
-#             mask[name] = torch.ones_like(param)
-    
-#     # Calculate global threshold across all conv layers
-#     if len(all_conv_weights) > 0 and prune_rate_conv > 0.0:
-#         all_weights = torch.cat(all_conv_weights)
-        
-#         # global_threshold = torch.quantile(torch.abs(all_weights), prune_rate_conv)
-
-#         # === Fix Start ===
-#         # Only count non-zero weights for threshold calculation
-#         # non_zero_weights = all_weights[all_weights != 0] 
-#         non_zero_weights = all_weights[torch.abs(all_weights) > 1e-8]
-        
-#         if len(non_zero_weights) > 0:
-#             global_threshold = torch.quantile(torch.abs(non_zero_weights), prune_rate_conv)
-#         else:
-#             global_threshold = 0.0
-#         # === Fixed End ===
-        
-#         # Apply global threshold to each conv layer
-#         for name, param in conv_params:
-#             mask[name] = (torch.abs(param.data) >= global_threshold).float()
-#     else:
-#         # No pruning
-#         for name, param in conv_params:
-#             mask[name] = torch.ones_like(param)
-    
-#     return mask
-
-
 def create_global_mask(
     model: nn.Module, 
     prune_rate_conv: float
@@ -375,86 +310,6 @@ def apply_mask(model: nn.Module, mask: Dict[str, torch.Tensor]):
 # ============================================================================
 # Training Helper
 # ============================================================================
-
-# def train_model(
-#     model: nn.Module,
-#     train_loader: torch.utils.data.DataLoader,
-#     optimizer: torch.optim.Optimizer,
-#     criterion: nn.Module,
-#     device: torch.device,
-#     epochs: int = 1,
-#     mask: Optional[Dict] = None,
-#     verbose: bool = True,
-#     scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None, # New !
-#     test_loader=None # New !
-# ) -> List[float]:
-#     """
-#     Train model for specified epochs.
-    
-#     Args:
-#         model: PyTorch model
-#         train_loader: Training data loader
-#         optimizer: Optimizer
-#         criterion: Loss function
-#         device: Device to train on
-#         epochs: Number of epochs
-#         mask: Optional pruning mask to apply after each step
-#         verbose: Whether to print progress
-    
-#     Returns:
-#         List of average losses per epoch
-#     """
-#     model.train()
-#     # losses = []
-#     history = {
-#         'train_loss': [],
-#         'test_acc': []  
-#     }
-    
-#     for epoch in range(epochs):
-#         running_loss = 0.0
-        
-#         iterator = tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}") if verbose and (epoch + 1) % 10 == 0 else train_loader
-        
-#         for batch_idx, (data, target) in enumerate(iterator):
-#             data, target = data.to(device), target.to(device)
-            
-#             optimizer.zero_grad()
-#             output = model(data)
-#             loss = criterion(output, target)
-#             loss.backward()
-#             optimizer.step()
-            
-#             # Apply mask after gradient step (if pruned)
-#             if mask is not None:
-#                 apply_mask(model, mask)
-            
-#             running_loss += loss.item()
-        
-#         avg_loss = running_loss / len(train_loader)
-#         history['train_loss'].append(avg_loss)
-
-#         # --- Validation Step (New!) ---
-#         if test_loader is not None:
-#             test_loss, test_acc = evaluate_model(model, test_loader, device)
-#             history['test_acc'].append(test_acc)
-#             model.train() # Set back to train mode
-#         else:
-#             test_acc = 0.0
-        
-#         if verbose:
-#         # if verbose and (epoch + 1) % 10 == 0:
-#             print(f"Epoch {epoch+1:02d}/{epochs} | Loss: {avg_loss:.4f} | Test Acc: {test_acc:.2f}%")
-#             # print(f"Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.4f}")
-
-#         # Step the scheduler (if provided) New !
-#         if scheduler is not None:
-#             scheduler.step()
-#             if (epoch + 1) in [56, 57, 71, 72] and verbose:
-#                 current_lr = optimizer.param_groups[0]['lr']
-#                 print(f" -> Scheduler Step! Current LR: {current_lr}")
-    
-#     return history
 
 
 def train_model(
@@ -739,6 +594,8 @@ def iterative_pruning(
         print(f"Pruning strategy: {config['pruning_strategy']}")
         print(f"Conv prune rate: {config['prune_rate_conv']:.1%}")
         print(f"FC prune rate: {config['prune_rate_fc']:.1%}")
+        if 'warmup_strategy' in config:
+            print(f"Warmup strategy: {config['warmup_strategy']}")
         print("=" * 70)
     
     for round_idx in range(n_rounds):
@@ -756,33 +613,33 @@ def iterative_pruning(
         # We calculate milestones dynamically based on epochs_per_round.
         scheduler = None
 
-        # === 定义 Rate 0.03 + Warmup 20k 的特殊 Scheduler ===
+        # === Define Special Scheduler for Rate 0.03 + Warmup 20k ===
         if config.get('warmup_strategy') == 'linear_20k':
-            # 假设总 epochs = 86 (对应 30k iters)
-            # Warmup 持续到第 57 epoch (对应 20k iters)
-            # Decay 在第 71 epoch (对应 25k iters)
+            # Assume total epochs = 86 (corresponding to 30k iters)
+            # Warmup lasts until epoch 57 (corresponding to 20k iters)
+            # Decay at epoch 71 (corresponding to 25k iters)
 
-            # warmup_epochs = int(epochs_per_round * 0.66)  # 对应 20k iterations
-            # decay_epoch = int(epochs_per_round * 0.83)    # 对应 25k iterations
+            # warmup_epochs = int(epochs_per_round * 0.66)  # corresponding to 20k iterations
+            # decay_epoch = int(epochs_per_round * 0.83)    # corresponding to 25k iterations
 
             warmup_epochs = int(epochs_per_round * 2 / 3)
             decay_epoch = int(epochs_per_round * 5 / 6)
             
             def lr_lambda(current_epoch, warmup_epochs=warmup_epochs, decay_epoch=decay_epoch):
-                # warmup_epochs = int(epochs_per_round * 0.66)  # 对应 20k iterations
-                # decay_epoch = int(epochs_per_round * 0.83)    # 对应 25k iterations
+                # warmup_epochs = int(epochs_per_round * 0.66)  # corresponding to 20k iterations
+                # decay_epoch = int(epochs_per_round * 0.83)    # corresponding to 25k iterations
                 
                 if current_epoch < warmup_epochs:
-                    # 线性热身：从 0 增加到 1.0 (即 1.0 * base_lr 0.03)
-                    # 为了避免除以0，加一个小 epsilon 或者从第一步开始
+                    # Linear warmup: increase from 0 to 1.0 (i.e., 1.0 * base_lr 0.03)
+                    # To avoid division by zero, add a small epsilon or start from step 1
                     return float(current_epoch + 1) / warmup_epochs
                 elif current_epoch < decay_epoch:
-                    # 第一次衰减区间：20k - 25k iters
-                    # 此时 LR 应该是 0.003，相对于 base 0.03 就是 0.1 倍
+                    # First decay interval: 20k - 25k iters
+                    # LR should be 0.003, which is 0.1x relative to base 0.03
                     return 0.1
                 else:
-                    # 第二次衰减区间：25k+ iters
-                    # 此时 LR 应该是 0.0003，相对于 base 0.03 就是 0.01 倍
+                    # Second decay interval: 25k+ iters
+                    # LR should be 0.0003, which is 0.01x relative to base 0.03
                     return 0.01
 
             scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
@@ -791,7 +648,7 @@ def iterative_pruning(
                 # print("Scheduler enabled: Linear Warmup to epoch 57, then decay.")
                 print(f"Scheduler enabled: Linear Warmup to epoch {warmup_epochs}, then decay.")
 
-        # ... 原有的 ResNet scheduler 逻辑 ...
+        # ... Original ResNet scheduler without warmup ...
         elif 'resnet' in config.get('description', '').lower():
         # Check if we are running the ResNet-18/-20 config
         # if 'resnet' in config.get('description', '').lower():
@@ -1022,7 +879,6 @@ def one_shot_pruning_efficient(
     }
 
 
-
 def random_reinit_pruning(
     model: nn.Module,
     train_loader: torch.utils.data.DataLoader,
@@ -1031,22 +887,25 @@ def random_reinit_pruning(
     optimizer_kwargs: Dict,
     device: torch.device,
     mask: Dict[str, torch.Tensor],
-    val_loader: Optional[torch.utils.data.DataLoader] = None, # [新增] 保持接口一致
+    config: Optional[Dict] = None,  # [Added] To pass scheduler config
+    val_loader: Optional[torch.utils.data.DataLoader] = None,
     epochs: int = 50,
     verbose: bool = True
 ) -> Dict:
     """
     Random reinitialization pruning (Control Experiment).
-    Returns a dictionary structure identical to one item in the iterative_pruning results list.
+    Re-initializes weights randomly while keeping the pruning mask structure.
     """
+    # Use default config if none provided (prevents errors if key is missing)
+    if config is None:
+        config = {}
+
     model = model.to(device)
     
-    # 0. Calculate total parameters (before applying mask, to get denominator)
-    # We assume the model structure passed in is the full structure
+    # 0. Calculate total parameters (denominator for sparsity calculation)
     total_params = sum(p.numel() for p in model.parameters())
 
-    # 1. Randomly reinitialize (Using Xavier/Glorot as discussed for ResNet)
-    # 确保这里和你的 _weights_init 逻辑一致
+    # 1. Randomly reinitialize (Using Xavier/Glorot for ResNet/Conv layers)
     def init_weights(m):
         if isinstance(m, (nn.Conv2d, nn.Linear)):
             nn.init.xavier_normal_(m.weight)
@@ -1055,7 +914,7 @@ def random_reinit_pruning(
     
     model.apply(init_weights)
     
-    # 2. Apply Mask (Structure)
+    # 2. Apply Mask (Enforce structure)
     apply_mask(model, mask)
     
     # Calculate sparsity stats
@@ -1066,25 +925,61 @@ def random_reinit_pruning(
         print("\n" + "=" * 70)
         print(f"Starting Random Reinit Control Experiment")
         print(f"Sparsity Level: {remaining_pct:.2f}% weights remaining")
+        print(f"Pruning strategy: {config['pruning_strategy']}")
+        print(f"Conv prune rate: {config['prune_rate_conv']:.1%}")
+        print(f"FC prune rate: {config['prune_rate_fc']:.1%}")
+        if 'warmup_strategy' in config:
+            print(f"Warmup strategy: {config['warmup_strategy']}")
         print("=" * 70)
     
-    # 3. Setup Optimizer & Scheduler
+    # 3. Setup Optimizer
     optimizer = optimizer_class(model.parameters(), **optimizer_kwargs)
     criterion = nn.CrossEntropyLoss()
 
+    # 4. Setup Scheduler (Synced with iterative_pruning)
     scheduler = None
+    
     if epochs > 0:
-        # Match the scheduler logic from iterative_pruning exactly
-        m1 = int(epochs * 0.66)
-        m2 = int(epochs * 0.83)
-        scheduler = torch.optim.lr_scheduler.MultiStepLR(
-            optimizer, milestones=[m1, m2], gamma=0.1
-        )
-        if verbose:
-            print(f"Scheduler enabled: MultiStepLR at epochs {m1} and {m2}")
+        # === Strategy 1: Rate 0.03 + Warmup 20k ===
+        if config.get('warmup_strategy') == 'linear_20k':
+            # Dynamic milestones: 20k (~2/3) and 25k (~5/6) iterations
+            warmup_epochs = int(epochs * 2 / 3)
+            decay_epoch = int(epochs * 5 / 6)
+            
+            def lr_lambda(current_epoch, warmup_epochs=warmup_epochs, decay_epoch=decay_epoch):
+                if current_epoch < warmup_epochs:
+                    # Linear warmup: 0 -> 1.0 (relative to base LR)
+                    return float(current_epoch + 1) / warmup_epochs
+                elif current_epoch < decay_epoch:
+                    # First decay (20k-25k): 0.1x
+                    return 0.1
+                else:
+                    # Second decay (25k+): 0.01x
+                    return 0.01
 
-    # 4. Train
-    # Capture the history return value!
+            scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
+            
+            if verbose:
+                print(f"Scheduler enabled: Linear Warmup to epoch {warmup_epochs}, then decay.")
+
+        # === Strategy 2: Standard ResNet (MultiStepLR) ===
+        # Check description or fallback to standard logic
+        elif 'resnet' in config.get('description', '').lower():
+            # Milestone 1: ~20k iters (2/3 of training)
+            m1 = int(epochs * 2 / 3)
+            # Milestone 2: ~25k iters (5/6 of training)
+            m2 = int(epochs * 5 / 6)
+            
+            scheduler = torch.optim.lr_scheduler.MultiStepLR(
+                optimizer, 
+                milestones=[m1, m2], 
+                gamma=0.1
+            )
+            
+            if verbose:
+                print(f"Scheduler enabled: MultiStepLR at epochs {m1} and {m2}")
+
+    # 5. Train
     history = train_model(
         model=model,
         train_loader=train_loader,
@@ -1099,7 +994,7 @@ def random_reinit_pruning(
         verbose=verbose
     )
     
-    # 5. Evaluate Final Performance
+    # 6. Evaluate Final Performance
     test_loss, test_accuracy = evaluate_model(model, test_loader, device)
     
     if verbose:
@@ -1108,15 +1003,110 @@ def random_reinit_pruning(
         print(f"  Remaining Params: {remaining_pct:.2f}%")
         print("=" * 70 + "\n")
     
-    # 6. Return Data (Matching iterative_pruning structure)
+    # 7. Return Data
     return {
-        'test_accuracy': test_accuracy,       # 最终精度 (用于画点)
+        'test_accuracy': test_accuracy,
         'test_loss': test_loss,
         'remaining_params': remaining_params,
-        'remaining_params_pct': remaining_pct, # 横坐标 (X-axis)
-        'history': history,                   # 训练曲线 (包含每个epoch的acc, 用于画过程)
-        'mask': None # Random Reinit 不需要存 mask，省点内存，如果需要可以存 mask
+        'remaining_params_pct': remaining_pct,
+        'history': history,
+        'mask': None  # Not saving mask to conserve memory
     }
+
+# def random_reinit_pruning(
+#     model: nn.Module,
+#     train_loader: torch.utils.data.DataLoader,
+#     test_loader: torch.utils.data.DataLoader,
+#     optimizer_class: type,
+#     optimizer_kwargs: Dict,
+#     device: torch.device,
+#     mask: Dict[str, torch.Tensor],
+#     val_loader: Optional[torch.utils.data.DataLoader] = None, # [新增] 保持接口一致
+#     epochs: int = 50,
+#     verbose: bool = True
+# ) -> Dict:
+#     """
+#     Random reinitialization pruning (Control Experiment).
+#     Returns a dictionary structure identical to one item in the iterative_pruning results list.
+#     """
+#     model = model.to(device)
+    
+#     # 0. Calculate total parameters (before applying mask, to get denominator)
+#     # We assume the model structure passed in is the full structure
+#     total_params = sum(p.numel() for p in model.parameters())
+
+#     # 1. Randomly reinitialize (Using Xavier/Glorot as discussed for ResNet)
+#     # _weights_init should be the same as iterative pruning
+#     def init_weights(m):
+#         if isinstance(m, (nn.Conv2d, nn.Linear)):
+#             nn.init.xavier_normal_(m.weight)
+#             if m.bias is not None:
+#                 nn.init.constant_(m.bias, 0)
+    
+#     model.apply(init_weights)
+    
+#     # 2. Apply Mask (Structure)
+#     apply_mask(model, mask)
+    
+#     # Calculate sparsity stats
+#     remaining_params = count_nonzero_parameters(model, mask)
+#     remaining_pct = 100.0 * remaining_params / total_params
+
+#     if verbose:
+#         print("\n" + "=" * 70)
+#         print(f"Starting Random Reinit Control Experiment")
+#         print(f"Sparsity Level: {remaining_pct:.2f}% weights remaining")
+#         print("=" * 70)
+    
+#     # 3. Setup Optimizer & Scheduler
+#     optimizer = optimizer_class(model.parameters(), **optimizer_kwargs)
+#     criterion = nn.CrossEntropyLoss()
+
+#     scheduler = None
+#     if epochs > 0:
+#         # Match the scheduler logic from iterative_pruning exactly
+#         m1 = int(epochs * 0.66)
+#         m2 = int(epochs * 0.83)
+#         scheduler = torch.optim.lr_scheduler.MultiStepLR(
+#             optimizer, milestones=[m1, m2], gamma=0.1
+#         )
+#         if verbose:
+#             print(f"Scheduler enabled: MultiStepLR at epochs {m1} and {m2}")
+
+#     # 4. Train
+#     # Capture the history return value!
+#     history = train_model(
+#         model=model,
+#         train_loader=train_loader,
+#         optimizer=optimizer,
+#         criterion=criterion,
+#         device=device,
+#         epochs=epochs,
+#         mask=mask,
+#         scheduler=scheduler,
+#         test_loader=test_loader,
+#         val_loader=val_loader,
+#         verbose=verbose
+#     )
+    
+#     # 5. Evaluate Final Performance
+#     test_loss, test_accuracy = evaluate_model(model, test_loader, device)
+    
+#     if verbose:
+#         print(f"\nRandom Reinit Result:")
+#         print(f"  Test Accuracy: {test_accuracy:.2f}%")
+#         print(f"  Remaining Params: {remaining_pct:.2f}%")
+#         print("=" * 70 + "\n")
+    
+#     # 6. Return Data (Matching iterative_pruning structure)
+#     return {
+#         'test_accuracy': test_accuracy,       # 最终精度 (用于画点)
+#         'test_loss': test_loss,
+#         'remaining_params': remaining_params,
+#         'remaining_params_pct': remaining_pct, # 横坐标 (X-axis)
+#         'history': history,                   # 训练曲线 (包含每个epoch的acc, 用于画过程)
+#         'mask': None # Random Reinit 不需要存 mask，省点内存，如果需要可以存 mask
+#     }
 
 
 
