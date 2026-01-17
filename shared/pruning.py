@@ -140,47 +140,54 @@ def is_conv_layer(name: str, param: torch.Tensor) -> bool:
 # ============================================================================
 
 def create_layerwise_mask(
-    model: nn.Module, 
-    prune_rate_conv: float, 
-    prune_rate_fc: float
+    model: nn.Module,
+    prune_rate_conv: float,
+    prune_rate_fc: float,
+    current_mask: Optional[Dict[str, torch.Tensor]] = None,
 ) -> Dict[str, torch.Tensor]:
     """
-    Create pruning mask using layer-wise strategy.
-    Each layer is pruned independently at its specified rate.
-    
-    Args:
-        model: PyTorch model
-        prune_rate_conv: Pruning rate for convolutional layers (0.0-1.0)
-        prune_rate_fc: Pruning rate for fully-connected layers (0.0-1.0)
-    
-    Returns:
-        Dictionary mapping parameter names to binary masks
+    Iterative layerwise pruning:
+    - If current_mask is provided, prune an additional fraction of the *remaining* weights.
+    - Never "unprunes" weights.
     """
-    mask = {}
-    
+    new_mask = {}
+
     for name, param in model.named_parameters():
-        if 'weight' not in name:
-            # Don't prune biases
+        if "weight" not in name:
+            continue  # don't prune biases
+
+        base = torch.ones_like(param) if current_mask is None else current_mask[name].to(param.device)
+
+        # select prune rate for this layer
+        p = prune_rate_conv if is_conv_layer(name, param) else prune_rate_fc
+        if p <= 0.0:
+            new_mask[name] = base
             continue
-        
-        # Determine pruning rate based on layer type
-        if is_conv_layer(name, param):
-            prune_rate = prune_rate_conv
-        else:
-            prune_rate = prune_rate_fc
-        
-        # Skip if prune_rate is 0
-        if prune_rate == 0.0:
-            mask[name] = torch.ones_like(param)
+
+        # consider only currently kept weights
+        w_abs = param.data.abs()
+        kept = base.bool()
+        kept_vals = w_abs[kept]
+
+        # if nothing left to prune
+        if kept_vals.numel() == 0:
+            new_mask[name] = base
             continue
-        
-        # Calculate threshold (prune_rate percentile)
-        threshold = torch.quantile(torch.abs(param.data), prune_rate)
-        
-        # Create mask: 1 = keep, 0 = prune
-        mask[name] = (torch.abs(param.data) >= threshold).float()
-    
-    return mask
+
+        # prune p fraction of the remaining (smallest magnitudes)
+        k_prune = int(p * kept_vals.numel())
+        if k_prune < 1:
+            new_mask[name] = base
+            continue
+
+        thresh = torch.kthvalue(kept_vals, k_prune).values  # threshold among kept weights
+        prune_now = kept & (w_abs <= thresh)
+
+        out = base.clone()
+        out[prune_now] = 0.0
+        new_mask[name] = out
+
+    return new_mask
 
 
 def create_global_mask(
@@ -234,6 +241,56 @@ def create_global_mask(
     return mask
 
 
+
+
+def create_random_mask(
+    model: nn.Module,
+    prune_rate: float,
+    seed: Optional[int] = None,
+    device: Optional[torch.device] = None,
+) -> Dict[str, torch.Tensor]:
+    """
+    Create a RANDOM unstructured pruning mask for Figure-1 "random" baseline.
+
+    prune_rate:
+      fraction to prune (set to 0). Example:
+        prune_rate=0.8  -> 80% weights removed, 20% kept.
+        prune_rate=0.2  -> 20% removed, 80% kept.
+
+    Returns:
+      mask dict mapping parameter name -> {0,1} tensor (same shape as weight tensor).
+      Only prunes parameters whose name contains "weight" (biases are not pruned).
+    """
+    if not (0.0 <= prune_rate <= 1.0):
+        raise ValueError("prune_rate must be in [0, 1].")
+
+    keep_prob = 1.0 - prune_rate
+
+    if seed is not None:
+        g = torch.Generator()
+        g.manual_seed(seed)
+    else:
+        g = None
+
+    masks: Dict[str, torch.Tensor] = {}
+
+    for name, p in model.named_parameters():
+        if "weight" not in name:
+            continue  # do not prune biases
+
+        dev = device if device is not None else p.device
+        shape = p.shape
+
+        # Bernoulli keep mask (1=keep, 0=prune)
+        if g is None:
+            m = (torch.rand(shape, device=dev) < keep_prob).float()
+        else:
+            m = (torch.rand(shape, device=dev, generator=g) < keep_prob).float()
+
+        masks[name] = m
+
+    return masks
+
 def apply_mask(model: nn.Module, mask: Dict[str, torch.Tensor]):
     """
     Apply pruning mask to model parameters.
@@ -251,6 +308,16 @@ def apply_mask(model: nn.Module, mask: Dict[str, torch.Tensor]):
 # Training Helper
 # ============================================================================
 
+import torch
+import torch.nn as nn
+from typing import Dict, Optional
+from tqdm import tqdm
+
+import torch
+import torch.nn as nn
+from typing import Dict, Optional
+from tqdm import tqdm
+
 def train_model(
     model: nn.Module,
     train_loader: torch.utils.data.DataLoader,
@@ -258,56 +325,119 @@ def train_model(
     criterion: nn.Module,
     device: torch.device,
     epochs: int = 1,
-    mask: Optional[Dict] = None,
-    verbose: bool = True
-) -> List[float]:
+    mask: Optional[Dict[str, torch.Tensor]] = None,
+    verbose: bool = True,
+    scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
+    val_loader: Optional[torch.utils.data.DataLoader] = None,
+    test_loader: Optional[torch.utils.data.DataLoader] = None,
+) -> Dict:
     """
-    Train model for specified epochs.
-    
-    Args:
-        model: PyTorch model
-        train_loader: Training data loader
-        optimizer: Optimizer
-        criterion: Loss function
-        device: Device to train on
-        epochs: Number of epochs
-        mask: Optional pruning mask to apply after each step
-        verbose: Whether to print progress
-    
-    Returns:
-        List of average losses per epoch
+    Conv6-adapted training loop.
+
+    IMPORTANT (pruning logic):
+    - This function does NOT create/update pruning masks.
+    - If `mask` is provided, it is treated as FIXED for the whole call.
+      We simply enforce it after each optimizer step so pruned weights stay zero.
+    - Mask updates (create_layerwise_mask / global pruning) must happen OUTSIDE,
+      between rounds (e.g., in iterative_pruning).
+
+    Early-stop proxy:
+    - If val_loader is provided, we record the epoch (and iteration) where VAL LOSS is minimal.
     """
+
     model.train()
-    losses = []
-    
+
+    history = {
+        "train_loss": [],
+        "val_loss": [],
+        "test_acc": [],
+        "early_stop_epoch": None,        # epoch (1-based) with minimum val loss
+        "early_stop_iter": None,         # early_stop_epoch * steps_per_epoch
+        "early_stop_test_acc": None,     # test acc at early_stop_epoch
+        "early_stop_val_acc": None,      # val acc at early_stop_epoch
+    }
+
+    steps_per_epoch = len(train_loader)
+
+    best_val_loss = float("inf")
+    best_epoch = None
+    best_test_acc = None
+    best_val_acc = None
+
+    # Ensure model is on device
+    model.to(device)
+
     for epoch in range(epochs):
         running_loss = 0.0
-        
+
         iterator = tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}") if verbose else train_loader
-        
-        for batch_idx, (data, target) in enumerate(iterator):
-            data, target = data.to(device), target.to(device)
-            
-            optimizer.zero_grad()
+
+        # ---- Train for one epoch ----
+        for data, target in iterator:
+            data, target = data.to(device, non_blocking=True), target.to(device, non_blocking=True)
+
+            optimizer.zero_grad(set_to_none=True)
             output = model(data)
             loss = criterion(output, target)
             loss.backward()
             optimizer.step()
-            
-            # Apply mask after gradient step (if pruned)
+
+            # Enforce FIXED mask after each update (do not update mask here)
             if mask is not None:
                 apply_mask(model, mask)
-            
-            running_loss += loss.item()
-        
-        avg_loss = running_loss / len(train_loader)
-        losses.append(avg_loss)
-        
-        if verbose:
-            print(f"Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.4f}")
-    
-    return losses
 
+            running_loss += loss.item()
+
+        avg_train_loss = running_loss / len(train_loader)
+        history["train_loss"].append(avg_train_loss)
+
+        # ---- Evaluate at end of epoch (optional) ----
+        current_val_loss, current_val_acc = None, None
+        current_test_acc = None
+
+        if val_loader is not None:
+            current_val_loss, current_val_acc = evaluate_model(model, val_loader, device)
+            history["val_loss"].append(current_val_loss)
+
+            # Early-stop proxy = epoch of MIN val loss
+            if current_val_loss < best_val_loss:
+                best_val_loss = current_val_loss
+                best_epoch = epoch + 1
+                best_val_acc = current_val_acc
+
+                if test_loader is not None:
+                    _, current_test_acc = evaluate_model(model, test_loader, device)
+                    best_test_acc = current_test_acc
+
+        if test_loader is not None:
+            # Log per-epoch test accuracy
+            _, epoch_test_acc = evaluate_model(model, test_loader, device)
+            history["test_acc"].append(epoch_test_acc)
+            if current_test_acc is None:
+                current_test_acc = epoch_test_acc
+
+        model.train()
+
+        # ---- Scheduler step (optional) ----
+        if scheduler is not None:
+            scheduler.step()
+
+        if verbose:
+            msg = f"Epoch {epoch+1:02d} | Train Loss: {avg_train_loss:.4f}"
+            if val_loader is not None:
+                msg += f" | Val Loss: {current_val_loss:.4f} | Val Acc: {current_val_acc:.2f}%"
+            if test_loader is not None:
+                msg += f" | Test Acc: {current_test_acc:.2f}%"
+            print(msg)
+
+    # Fill early-stop fields (epoch of minimum val loss)
+    if val_loader is not None and best_epoch is not None:
+        history["early_stop_epoch"] = best_epoch
+        history["early_stop_iter"] = best_epoch * steps_per_epoch
+        history["early_stop_val_acc"] = best_val_acc
+        history["early_stop_test_acc"] = best_test_acc if best_test_acc is not None else 0.0
+
+    return history
 
 def evaluate_model(
     model: nn.Module,
@@ -354,7 +484,22 @@ def evaluate_model(
 # Main Pruning Algorithms
 # ============================================================================
 
-def iterative_pruning(
+import copy
+import torch
+import torch.nn as nn
+from typing import Dict, List, Optional
+
+import copy
+import torch
+import torch.nn as nn
+from typing import Dict, List, Optional
+
+import copy
+import torch
+import torch.nn as nn
+from typing import Dict, List, Optional
+
+def iterative_pruning_conv6(
     model: nn.Module,
     train_loader: torch.utils.data.DataLoader,
     test_loader: torch.utils.data.DataLoader,
@@ -365,39 +510,44 @@ def iterative_pruning(
     config: Optional[Dict] = None,
     n_rounds: int = 15,
     epochs_per_round: int = 20,
-    verbose: bool = True
+    verbose: bool = True,
 ) -> List[Dict]:
 
-    # Default Conv-6 config (Figure 2 / paper table style)
+
+    # Default Conv6 config (paper Figure-2 style)
     if config is None:
         config = {
-            "prune_rate_conv": 0.15,        # Conv layers: 15% per round
-            "prune_rate_fc": 0.20,          # FC layers: 20% per round
+            "prune_rate_conv": 0.15,
+            "prune_rate_fc": 0.20,
             "pruning_strategy": "layerwise",
-            "description": "Conv-6 for CIFAR-10"
+            "description": "Conv-6 for CIFAR-10",
         }
 
-    # Store run metadata (optional)
+    # record metadata (optional)
     config["optimizer_kwargs"] = optimizer_kwargs
     config["epochs_per_round"] = epochs_per_round
     config["n_rounds"] = n_rounds
 
+    if config.get("pruning_strategy", "layerwise") != "layerwise":
+        raise ValueError("Conv6 version expects pruning_strategy='layerwise'.")
+
     model = model.to(device)
 
-    # Save initial weights θ0
+    # Step 1: Save initial weights θ0
     initial_weights = copy.deepcopy(model.state_dict())
     initial_params = count_parameters(model)
 
     results: List[Dict] = []
-    current_mask = None
+    current_mask: Optional[Dict[str, torch.Tensor]] = None
 
     if verbose:
         print("=" * 70)
-        print("Starting Iterative Pruning (Conv-6)")
+        print("Starting Iterative Pruning (Conv6)")
         print(f"Initial parameters: {initial_params:,}")
         print(f"Pruning strategy: {config['pruning_strategy']}")
-        print(f"Conv prune rate: {config['prune_rate_conv']:.1%}")
-        print(f"FC prune rate: {config['prune_rate_fc']:.1%}")
+        print(f"Conv prune rate (per round): {config['prune_rate_conv']:.1%}")
+        print(f"FC prune rate (per round):   {config['prune_rate_fc']:.1%}")
+        print(f"Epochs per round: {epochs_per_round}")
         print(f"Optimizer: {optimizer_class.__name__} {optimizer_kwargs}")
         print("=" * 70)
 
@@ -407,10 +557,10 @@ def iterative_pruning(
             print(f"Round {round_idx + 1}/{n_rounds}")
             print(f"{'='*70}")
 
-        # Step 2: Train (Conv-6: no special scheduler/warmup)
+        # Step 2: Train (fixed mask within the round)
         optimizer = optimizer_class(model.parameters(), **optimizer_kwargs)
         criterion = nn.CrossEntropyLoss()
-        scheduler = None  # <- keep None for Conv-6
+        scheduler = None  # Conv6: typically None
 
         history = train_model(
             model=model,
@@ -420,44 +570,33 @@ def iterative_pruning(
             device=device,
             epochs=epochs_per_round,
             mask=current_mask,
-            scheduler=scheduler,      # stays None
-            test_loader=test_loader,  # keep if your train_model logs test/val
+            scheduler=scheduler,
+            test_loader=test_loader,
             val_loader=val_loader,
-            verbose=verbose
+            verbose=verbose,
         )
 
-        # Evaluate after training
+        # Evaluate
         test_loss, test_accuracy = evaluate_model(model, test_loader, device)
 
-        # Step 3: Prune -> create new mask
-        if config["pruning_strategy"] == "layerwise":
-            new_mask = create_layerwise_mask(
-                model,
-                config["prune_rate_conv"],
-                config["prune_rate_fc"]
-            )
-        elif config["pruning_strategy"] == "global":
-            # Conv-6 is normally layerwise; but keep this for completeness
-            new_mask = create_global_mask(model, config["prune_rate_conv"])
-        else:
-            raise ValueError(f"Unknown pruning strategy: {config['pruning_strategy']}")
+        # Step 3: Prune (update mask ONCE per round, progressively)
+        # IMPORTANT: use the iterative/prgressive mask update (depends on current_mask)
+        current_mask = create_layerwise_mask(
+            model=model,
+            prune_rate_conv=config["prune_rate_conv"],
+            prune_rate_fc=config["prune_rate_fc"],
+            current_mask=current_mask,
+        )
 
-        # Accumulate masks (once pruned, always pruned)
-        if current_mask is not None:
-            for name in new_mask:
-                if name in current_mask:
-                    new_mask[name] = new_mask[name] * current_mask[name]
-
-        current_mask = new_mask
-
-        # Compute remaining weights (percent weights remaining)
+        # Count remaining parameters (using mask)
         remaining_params = count_nonzero_parameters(model, current_mask)
         remaining_pct = 100.0 * remaining_params / initial_params
 
-        # Step 4: Rewind to θ0 and apply mask
+        # Step 4: Reset to θ0 and apply mask
         model.load_state_dict(initial_weights)
         apply_mask(model, current_mask)
 
+        # Record results
         result = {
             "round": round_idx + 1,
             "test_accuracy": test_accuracy,
@@ -472,15 +611,14 @@ def iterative_pruning(
         if verbose:
             print(f"\nRound {round_idx + 1} Results:")
             print(f"  Test Accuracy: {test_accuracy:.2f}%")
-            print(f"  Remaining Parameters: {remaining_params:,} ({remaining_pct:.2f}%)")
+            print(f"  Remaining Parameters: {int(remaining_params):,} ({remaining_pct:.2f}%)")
 
     if verbose:
         print(f"\n{'='*70}")
-        print("Iterative Pruning Complete (Conv-6)!")
+        print("Iterative Pruning Complete (Conv6)!")
         print(f"{'='*70}")
 
     return results
-
 def one_shot_pruning(
     model: nn.Module,
     train_loader: torch.utils.data.DataLoader,
