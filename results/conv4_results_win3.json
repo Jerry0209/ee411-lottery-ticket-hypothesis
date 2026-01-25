@@ -1,0 +1,48 @@
+{
+  "ticket": {
+    "kr=0.030000_trial=0": {
+      "keep_ratio": 0.03,
+      "trial": 0,
+      "rounds": 19,
+      "best_iter": 24900,
+      "test_acc": 0.6996,
+      "max_steps": 25000,
+      "lr": 0.0003,
+      "conv_prune": 0.1,
+      "fc_prune": 0.2
+    },
+    "kr=0.030000_trial=1": {
+      "keep_ratio": 0.03,
+      "trial": 1,
+      "rounds": 19,
+      "best_iter": 25000,
+      "test_acc": 0.5989,
+      "max_steps": 25000,
+      "lr": 0.0003,
+      "conv_prune": 0.1,
+      "fc_prune": 0.2
+    },
+    "kr=0.013000_trial=0": {
+      "keep_ratio": 0.013,
+      "trial": 0,
+      "rounds": 24,
+      "best_iter": 24900,
+      "test_acc": 0.4732,
+      "max_steps": 25000,
+      "lr": 0.0003,
+      "conv_prune": 0.1,
+      "fc_prune": 0.2
+    },
+    "kr=0.013000_trial=1": {
+      "keep_ratio": 0.013,
+      "trial": 1,
+      "rounds": 24,
+      "best_iter": 25000,
+      "test_acc": 0.5219,
+      "max_steps": 25000,
+      "lr": 0.0003,
+      "conv_prune": 0.1,
+      "fc_prune": 0.2
+    }
+  }
+}

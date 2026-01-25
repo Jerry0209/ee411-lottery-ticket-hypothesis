@@ -1,0 +1,26 @@
+{
+  "ticket": {
+    "kr=0.071000_trial=0": {
+      "keep_ratio": 0.071,
+      "trial": 0,
+      "rounds": 14,
+      "best_iter": 15000,
+      "test_acc": 0.7575,
+      "max_steps": 25000,
+      "lr": 0.0003,
+      "conv_prune": 0.1,
+      "fc_prune": 0.2
+    },
+    "kr=0.071000_trial=1": {
+      "keep_ratio": 0.071,
+      "trial": 1,
+      "rounds": 14,
+      "best_iter": 15100,
+      "test_acc": 0.7557,
+      "max_steps": 25000,
+      "lr": 0.0003,
+      "conv_prune": 0.1,
+      "fc_prune": 0.2
+    }
+  }
+}
