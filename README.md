@@ -10,8 +10,8 @@ when initialized with the same original weights.
 - Evaluated LeNet, Conv-2, Conv-4, Conv-6, and ResNet-20
 - Experiments on MNIST and CIFAR-10
 - Analyzed on:
-      Final accuracy
-      Training speed (early stopping iteration)
+      Final accuracy,
+      Training speed (early stopping iteration),
       Effect of initialization and learning-rate schedules
   
 ## Team Members
