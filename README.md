@@ -80,10 +80,10 @@ pip install -r requirements.txt
 
 5. Run all cells!
 
-## Timeline （Updated on 06.01.2026）
-- **Jan 6-7**: Setup repository structure
-- **Jan 7-10**: Individual model training
-- **Jan 10**: Team meeting
+## Timeline （Updated on 26.01.2026）
+The project was developed step by step, with regular meetings and close collaboration among team members. We first set up a shared repository structure and common experiment templates so that all models could be trained and evaluated in a consistent way. Different architectures, including LeNet, Conv-2/4/6, and ResNet-20, were then trained and pruned independently by team members, which allowed us to explore multiple settings in parallel.
+
+During the project, we met regularly to share baseline results, pruning curves, and observations about training behavior. Final figures and conclusions were obtained by checking consistency across implementations, ensuring that the results are reproducible and fairly comparable across different pruning strategies.
 
 ### For Team Meeting (Jan 10):
 - Share your baseline accuracy
