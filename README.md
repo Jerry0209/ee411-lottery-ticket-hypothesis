@@ -1,7 +1,19 @@
 # EE-411 Lottery Ticket Hypothesis
 
-Reproducing "The Lottery Ticket Hypothesis: Finding Sparse, Trainable Neural Networks" (Frankle & Carbin, 2019)
+This repository contains a reproduction and empirical analysis of
+“The Lottery Ticket Hypothesis: Finding Sparse, Trainable Neural Networks” by Frankle & Carbin (ICLR 2019).
 
+We investigate whether dense neural networks contain sparse subnetworks (winning tickets) that can be trained in isolation to reach comparable accuracy
+when initialized with the same original weights.
+
+- Reproduced one-shot and iterative magnitude pruning experiments
+- Evaluated LeNet, Conv-2, Conv-4, Conv-6, and ResNet-20
+- Experiments on MNIST and CIFAR-10
+- Analyzed on:
+      Final accuracy
+      Training speed (early stopping iteration)
+      Effect of initialization and learning-rate schedules
+  
 ## Team Members
 - **Katherine**: Conv-2
 - **Furkan**: Conv-4  
@@ -36,7 +48,10 @@ ee411-lottery-ticket-hypothesis/
 ├── environment.yml              # Conda environment on WSL
 ├── .gitignore                   # Git ignore rules
 └── README.md                    # This file
+
 ```
+
+
 
 ## Quick Start
 
