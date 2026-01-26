@@ -56,6 +56,3 @@ The project was developed step by step, with regular meetings and close collabor
 
 During the project, we met regularly to share baseline results, pruning curves, and observations about training behavior. Final figures and conclusions were obtained by checking consistency across implementations, ensuring that the results are reproducible and fairly comparable across different pruning strategies.
 
-4. Navigate to `results/data/` to view JSON results
-5. Compare branches to see different team members' results
-
