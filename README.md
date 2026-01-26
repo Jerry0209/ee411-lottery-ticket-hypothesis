@@ -133,10 +133,6 @@ git merge main
 ```
 
 
-## 📖 Complete Git Workflow Example
-
-### Scenario: Katherine wants to work on Conv-2
-
 #### First Time Setup (Only Once)
 
 ```bash
