@@ -9,6 +9,8 @@ Reproducing "The Lottery Ticket Hypothesis: Finding Sparse, Trainable Neural Net
 - **Gagan**: LeNet (MNIST), Winning Tickets
 - **Jerry**: ResNet-18, Pruning Algorithm
 
+Each of the team member contributed to the writing the report.
+
 ## Project Structure
 ```
 ee411-lottery-ticket-hypothesis/
@@ -108,16 +110,6 @@ git commit -m "Your message describing what you did"
 git commit -m "Add Conv-2 baseline training"
 ```
 
-**Good commit messages:**
-- ✅ "Add Conv-2 model definition"
-- ✅ "Fix bug in pruning algorithm"
-- ✅ "Complete baseline training experiments"
-
-**Bad commit messages:**
-- ❌ "update"
-- ❌ "fix"
-- ❌ "asdfasdf"
-
 #### 4. **Push** (Upload to GitHub)
 ```bash
 # First time pushing your branch
@@ -171,42 +163,6 @@ git commit -m "Add Conv-2 experiment notebook template"
 git push -u origin katherine-dev
 ```
 
-#### Daily Workflow
-
-**Each time you start working:**
-
-```bash
-# 1. Make sure you're on your branch
-git checkout katherine-dev
-
-# 2. Get latest changes from main
-git checkout main
-git pull origin main
-git checkout katherine-dev
-git merge main
-
-# 3. Start working...
-```
-
-**After you finish working:**
-
-```bash
-# 1. Check what changed
-git status
-
-# 2. Add your changes
-git add notebooks/katherine/conv2_experiment.ipynb
-git add results/figures/katherine_*.png       
-
-# 3. Commit with a message
-git commit -m "Complete Conv-2 baseline training"
-
-# 4. Push to GitHub
-git push
-
-# Done! Your work is saved online.
-```
-
 #### Viewing Results on GitHub
 1. Go to the repository on GitHub
 2. Switch branches using the branch dropdown (top-left)
@@ -214,137 +170,3 @@ git push
 4. Navigate to `results/data/` to view JSON results
 5. Compare branches to see different team members' results
 
-
-
-## 🛠️ Common Git Scenarios
-
-### Scenario 1: "I modified some files, how do I save them?"
-
-```bash
-# 1. Check what you changed
-git status
-
-# 2. Add files you want to save
-git add notebooks/your-name/your_file.ipynb
-
-# 3. Commit
-git commit -m "Describe what you did"
-
-# 4. Push to GitHub
-git push
-```
-
-### Scenario 2: "I want to see the latest code from the team"
-
-```bash
-# 1. Go to main branch
-git checkout main
-
-# 2. Download latest changes
-git pull origin main
-
-# 3. Go back to your branch
-git checkout your-name-dev
-
-# 4. Merge latest changes
-git merge main
-```
-
-### Scenario 3: "I accidentally modified the wrong file"
-
-```bash
-# Undo changes to a file (before committing)
-git checkout -- path/to/file.py
-
-# Example:
-git checkout -- shared/pruning.py
-```
-
-### Scenario 4: "I committed something wrong"
-
-```bash
-# Undo the last commit (keep changes)
-git reset --soft HEAD~1
-
-# Now you can modify and commit again
-```
-
-### Scenario 5: "Git says there's a conflict"
-
-**This happens when you and others both modified the same file.**
-
-```bash
-# Git will show something like:
-# CONFLICT (content): Merge conflict in shared/pruning.py
-
-# 1. Open the file in a text editor
-# 2. Look for conflict markers:
-<<<<<<< HEAD
-Your changes
-=======
-Jerry's changes
->>>>>>> main
-
-# 3. Decide what to keep:
-#    - Keep your version, or
-#    - Keep Jerry's version, or
-#    - Combine both
-# 4. Remove the conflict markers (<<<, ===, >>>)
-# 5. Save the file
-# 6. Add and commit:
-git add shared/pruning.py
-git commit -m "Resolve merge conflict in pruning.py"
-git push
-```
-
-
-
-## ⚠️ Important Rules
-
-### ✅ DO:
-1. **Work on your own branch** (`your-name-dev`)
-2. **Commit often** (every 1-2 hours of work)
-3. **Write clear commit messages**
-4. **Only modify files in your folder** (`notebooks/your-name/`)
-5. **Pull from main before starting work each day**
-6. **Ask for help if confused** (better than breaking things!)
-
-### ❌ DON'T:
-1. **Don't work directly on `main` branch**
-2. **Don't modify other people's notebooks**
-3. **Don't commit large binary files** (> 10MB)
-4. **Don't commit passwords or API keys**
-5. **Don't use `git push --force`** (unless you know what you're doing)
-
-### Special Rule for `shared/` folder:
-- **Only Jerry modifies files in `shared/`**
-- If you find a bug, tell Jerry (don't fix it yourself)
-- This prevents conflicts
-
-
-## Quick Reference Card
-
-```bash
-# 🚀 Start working
-git checkout your-name-dev
-git pull origin main
-jupyter notebook
-
-# 💾 Save your work
-git add notebooks/your-name/
-git commit -m "Description"
-git push
-
-# 📥 Get team's updates
-git checkout main
-git pull origin main
-git checkout your-name-dev
-git merge main
-
-# ❓ Check status
-git status
-git branch
-
-# 🆘 Undo changes
-git checkout -- filename
-```
