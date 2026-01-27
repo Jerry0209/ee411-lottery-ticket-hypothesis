@@ -15,8 +15,8 @@ when initialized with the same original weights.
       Effect of initialization and learning-rate schedules
   
 ## Team Members
-- **Katherine**: Conv-2
-- **Furkan**: Conv-4  
+- **Katherine**: Conv-2 (CIFAR-10)
+- **Furkan**: Conv-4 (CIFAR-10)
 - **Xavier**: Conv-6 (CIFAR-10)
 - **Gagan**: LeNet (MNIST), Winning Tickets
 - **Jerry**: ResNet-18, Pruning Algorithm
