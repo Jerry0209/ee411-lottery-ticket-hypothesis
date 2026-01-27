@@ -26,7 +26,6 @@ Team-wide structure, shared utilities, and coordination details are intentionall
 This folder contains the **final and authoritative Conv-4 experiments**.
 
 - `conv4_winning_ticket.ipynb` is the **primary reference notebook** for Conv-4.
-- All reported metrics (early-stopping iteration, test accuracy, pruning behavior) are derived from this notebook.
 - Experimental results are saved in **JSON files** under the `results/` directory.
 - All figures used in analysis are generated directly from these JSON result files.
 
