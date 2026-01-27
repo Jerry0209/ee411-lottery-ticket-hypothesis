@@ -11,6 +11,7 @@ from .utils import save_results
 
 
 def create_initialized_model(model_name, device):
+    """Create and initialize model with Xavier initialization."""
     if model_name == 'LeNet300_100':
         model = LeNet300_100()
     else:
@@ -25,6 +26,7 @@ def create_initialized_model(model_name, device):
 
 
 def run_experiment1_random_sparse(config, train_loader, val_loader, test_loader, device):
+    """Experiment 1: Train randomly pruned sparse networks."""
     exp_config = config['exp1']
     all_results = defaultdict(list)
     criterion = nn.CrossEntropyLoss()
@@ -50,6 +52,7 @@ def run_experiment1_random_sparse(config, train_loader, val_loader, test_loader,
 
 
 def run_experiment2_oneshot_winning(config, train_loader, val_loader, test_loader, device):
+    """Experiment 2: One-shot magnitude pruning (winning tickets)."""
     exp_config = config['exp2']
     all_results = defaultdict(list)
     criterion = nn.CrossEntropyLoss()
@@ -88,6 +91,7 @@ def run_experiment2_oneshot_winning(config, train_loader, val_loader, test_loade
 
 
 def run_experiment3_iterative_winning(config, train_loader, val_loader, test_loader, device):
+    """Experiment 3: Iterative magnitude pruning (winning tickets)."""
     exp_config = config['exp3']
     all_results = defaultdict(list)
     criterion = nn.CrossEntropyLoss()
@@ -149,6 +153,7 @@ def run_experiment3_iterative_winning(config, train_loader, val_loader, test_loa
 
 
 def run_experiment4_oneshot_reinit(config, exp2_results, train_loader, val_loader, test_loader, device):
+    """Experiment 4: One-shot winning tickets with random reinitialization."""
     exp_config = config['exp4']
     all_results = defaultdict(list)
     criterion = nn.CrossEntropyLoss()
@@ -179,6 +184,7 @@ def run_experiment4_oneshot_reinit(config, exp2_results, train_loader, val_loade
 
 
 def run_experiment5_iterative_reinit(config, exp3_results, train_loader, val_loader, test_loader, device):
+    """Experiment 5: Iterative winning tickets with random reinitialization."""
     exp_config = config['exp5']
     all_results = defaultdict(list)
     criterion = nn.CrossEntropyLoss()

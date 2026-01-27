@@ -1,3 +1,4 @@
+# Experiment configuration for Lottery Ticket Hypothesis experiments
 config = {
     'dataset': 'MNIST',
     'data_path': './data',

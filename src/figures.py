@@ -7,6 +7,7 @@ from .utils import load_results, ensure_dir
 
 
 def plot_figure1(exp1_results, exp2_results, output_path):
+    """Plot comparison of random sparse vs winning tickets."""
     sparsities = sorted(exp1_results.keys(), reverse=True)
     sparsities_pct = [s * 100 for s in sparsities]
 
@@ -73,6 +74,7 @@ def plot_figure1(exp1_results, exp2_results, output_path):
 
 
 def plot_figure3(exp3_results, exp5_results, output_path):
+    """Plot learning curves for iterative winning tickets vs reinitialized."""
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
     sparsities = sorted([s for s in exp3_results.keys() if s < 1.0], reverse=True)
 
@@ -144,6 +146,7 @@ def plot_figure3(exp3_results, exp5_results, output_path):
 
 
 def plot_figure4(exp2_results, exp3_results, exp4_results, exp5_results, output_dir):
+    """Plot comprehensive comparison of all methods."""
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5))
     oneshot_sparsities = sorted(exp2_results.keys(), reverse=True)
     iterative_sparsities = sorted(exp3_results.keys(), reverse=True)
@@ -318,6 +321,7 @@ def plot_figure4(exp2_results, exp3_results, exp4_results, exp5_results, output_
 
 
 def load_experiment_results(metrics_dir, exp_name):
+    """Load experiment results from file."""
     filepath = f"{metrics_dir}/{exp_name}.pt"
     if os.path.exists(filepath):
         return load_results(filepath)
@@ -325,6 +329,7 @@ def load_experiment_results(metrics_dir, exp_name):
 
 
 def generate_all_figures(config):
+    """Generate all figures based on config requirements."""
     metrics_dir = config['results_dir']
     figures_dir = config['figures_dir']
     ensure_dir(figures_dir)
@@ -373,6 +378,7 @@ def generate_all_figures(config):
 
 
 def main():
+    """CLI entry point for generating figures."""
     parser = argparse.ArgumentParser(description='Generate lottery ticket figures')
     parser.add_argument('--results', type=str, required=True,
                        help='Path to base results directory (contains metrics/ and figures/)')

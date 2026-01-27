@@ -5,6 +5,7 @@ SUPPORTED_MODELS = ['LeNet300_100']
 
 
 class LeNet300_100(nn.Module):
+    """LeNet-300-100: Fully connected network with 300 and 100 hidden units."""
     def __init__(self, num_classes=10):
         super(LeNet300_100, self).__init__()
         self.fc1 = nn.Linear(28 * 28, 300)
@@ -20,9 +21,11 @@ class LeNet300_100(nn.Module):
         return x
     
     def count_parameters(self):
+        """Count total trainable parameters."""
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
     def count_active_parameters(self, mask_dict=None):
+        """Count active parameters after applying mask."""
         if mask_dict is None:
             return self.count_parameters()
         
@@ -37,6 +40,7 @@ class LeNet300_100(nn.Module):
 
 
 def get_model_info(model):
+    """Get model parameter statistics."""
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     

@@ -161,7 +161,7 @@ python scripts/generate_figures.py --results results/minimal/
 EOF
 
 echo ""
-echo "✓ Directory structure created!"
+echo "[OK] Directory structure created!"
 echo ""
 echo "Project structure:"
 tree -L 3 -I '__pycache__|*.pyc|data' 2>/dev/null || find . -type d -not -path '*/\.*' | sed 's|[^/]*/| |g'

@@ -6,6 +6,7 @@ from .pruning import apply_mask
 
 
 def validate(model, device, val_loader, criterion):
+    """Evaluate model on validation set."""
     model.eval()
     val_loss = 0
     correct = 0
@@ -28,6 +29,7 @@ def train_with_early_stop_tracking(model, device, train_loader, val_loader,
                                    optimizer, criterion, max_iterations=50000,
                                    mask_dict=None, eval_every=100, verbose=False,
                                    test_loader=None):
+    """Train model with early stopping based on validation loss."""
     model.train()
 
     results = {
@@ -115,6 +117,7 @@ def train_with_early_stop_tracking(model, device, train_loader, val_loader,
 
 
 def create_optimizer(model, config):
+    """Create optimizer based on config (Adam or SGD)."""
     if config['optimizer'].lower() == 'adam':
         optimizer = optim.Adam(model.parameters(), lr=config['learning_rate'])
     elif config['optimizer'].lower() == 'sgd':

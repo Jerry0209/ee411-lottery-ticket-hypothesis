@@ -17,6 +17,7 @@ from src.figures import generate_all_figures
 
 
 def setup_results_dirs(config):
+    """Create timestamped directories for storing experiment results."""
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     base_name = f"{config['model']}_{config['dataset']}"
 
@@ -37,6 +38,7 @@ def setup_results_dirs(config):
 
 
 def validate_model(model_name):
+    """Validate that the requested model is supported."""
     if model_name not in SUPPORTED_MODELS:
         print(f"Error: Model '{model_name}' not supported.")
         print(f"Supported models: {SUPPORTED_MODELS}")
@@ -44,6 +46,7 @@ def validate_model(model_name):
 
 
 def main():
+    """Run all configured lottery ticket experiments and generate figures."""
     validate_model(config['model'])
     base_dir, metrics_dir, figures_dir = setup_results_dirs(config)
     device = get_device(config['device'])

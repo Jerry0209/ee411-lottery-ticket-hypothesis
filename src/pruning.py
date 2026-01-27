@@ -2,6 +2,7 @@ import torch
 
 
 def create_random_mask(model, sparsity):
+    """Create random pruning mask for given sparsity level."""
     mask_dict = {}
     
     for name, param in model.named_parameters():
@@ -22,6 +23,7 @@ def create_random_mask(model, sparsity):
 
 def create_magnitude_mask_layerwise(model, target_sparsity, existing_mask=None,
                                     layer_specific_rates=False, prune_rate=0.2):
+    """Create magnitude-based pruning mask, optionally iteratively."""
     mask_dict = {}
     
     for name, param in model.named_parameters():
@@ -60,12 +62,14 @@ def create_magnitude_mask_layerwise(model, target_sparsity, existing_mask=None,
 
 
 def apply_mask(model, mask_dict):
+    """Apply pruning mask to model weights."""
     for name, param in model.named_parameters():
         if name in mask_dict:
             param.data *= mask_dict[name].to(param.device)
 
 
 def combine_masks(mask1, mask2):
+    """Combine two masks element-wise."""
     combined = {}
     for name in mask1:
         combined[name] = mask1[name] * mask2[name]
@@ -73,6 +77,7 @@ def combine_masks(mask1, mask2):
 
 
 def count_parameters(mask_dict):
+    """Count active parameters in mask."""
     if mask_dict is None:
         return 0, {}
     
@@ -89,6 +94,7 @@ def count_parameters(mask_dict):
 
 
 def get_sparsity(mask_dict, model):
+    """Calculate sparsity ratio (active params / total params)."""
     if mask_dict is None:
         return 1.0
     

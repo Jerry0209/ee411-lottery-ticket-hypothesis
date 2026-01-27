@@ -6,6 +6,7 @@ SUPPORTED_DATASETS = ['MNIST', 'CIFAR10']
 
 
 def load_dataset(config):
+    """Load dataset based on configuration."""
     dataset_name = config['dataset']
 
     if dataset_name == 'MNIST':
@@ -27,6 +28,7 @@ def load_dataset(config):
 
 
 def load_mnist(data_path='./data', train_size=55000, val_size=5000, batch_size=60):
+    """Load MNIST dataset with train/validation/test splits."""
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.1307,), (0.3081,))
@@ -77,6 +79,7 @@ def load_mnist(data_path='./data', train_size=55000, val_size=5000, batch_size=6
 
 
 def load_cifar10(data_path='./data', train_size=45000, val_size=5000, batch_size=60):
+    """Load CIFAR-10 dataset with train/validation/test splits."""
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2470, 0.2435, 0.2616))
