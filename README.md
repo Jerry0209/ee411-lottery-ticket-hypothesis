@@ -59,7 +59,7 @@ All final experimental outcomes were:
 - Verified for consistency
 - Consolidated into dedicated JSON result files
 
-All figures in `results/figures/` are generated exclusively from these consolidated results.
+All figures in `results` are generated exclusively from these consolidated results.
 
 ---
 
