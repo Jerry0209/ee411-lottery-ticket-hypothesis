@@ -1,58 +1,74 @@
 # Conv-4 Experiments – Lottery Ticket Hypothesis
 
-This branch contains my individual experiments for the EE-411 project  
+This branch contains my individual experiments for the EE-411 course project  
 **“The Lottery Ticket Hypothesis: Finding Sparse, Trainable Neural Networks”**  
-(Frankle & Carbin, 2019).
+by Frankle & Carbin (2019).
 
-The focus of this branch is the **Conv-4 architecture trained on CIFAR-10**.
+The experiments in this branch focus exclusively on the **Conv-4 architecture trained on CIFAR-10**.
 
 ---
 
 ## Scope of This Branch
 
-This branch includes:
+This branch includes all work related to the Conv-4 model, organized into:
+- Final experiments used in analysis and reporting
+- Intermediate trial experiments conducted during development
+- Result files (JSON logs and figures) used to extract stable measurements
 
-- Final Conv-4 experiments used for analysis and reporting
-- Intermediate trial experiments used during development
-- Result files (plots and logs) necessary to interpret training behavior
-
-Team-wide structure, shared utilities, and coordination details are intentionally omitted here.
+Team-wide structure, shared utilities, and coordination details are intentionally excluded.
 
 ---
 
 ## Folder Structure
 
+### `main/`
+
+This folder contains the **final and authoritative Conv-4 experiments**.
+
+- `conv4_winning_ticket.ipynb` is the **primary reference notebook** for Conv-4.
+- All reported metrics (early-stopping iteration, test accuracy, pruning behavior) are derived from this notebook.
+- Experimental results are saved in **JSON files** under the `results/` directory.
+- All figures used in analysis are generated directly from these JSON result files.
 
 ### `trials/`
-This folder contains **experimental notebooks** used to:
+
+This folder contains **experimental and exploratory notebooks** used during development to:
 - Test pruning schedules
 - Tune hyperparameters
 - Debug training instabilities
 - Validate early-stopping behavior
 
-Results in this folder are **not meant to be reported**, but kept for transparency and reproducibility.
+Notebooks in this folder may include:
+- Interrupted executions
+- Partial runs
+- Temporary debugging or logging code
 
-### `main/`
-This folder contains the **final Conv-4 experiments** referenced in analysis and figures.
+Results in `trials/` are **not intended for reporting**, but are kept for transparency and reproducibility of the development process.
 
 ---
 
 ## Notes on Result Files
 
-- During training, results were originally saved **at every iteration**, which caused significant slowdowns.
-- To reduce runtime, logging frequency was later reduced and experiments were **split into multiple runs**.
-- Although some runs do not cover the full iteration range continuously,  
-  **the relevant training dynamics (early stopping, accuracy trends, pruning behavior)** are still clearly observable.
-- All figures included in `results/figures/` are generated from these saved results.
+- During early development, results were logged at every iteration, which caused significant slowdowns.
+- To reduce runtime, logging frequency was later reduced and experiments were split across multiple executions.
+- As a result, some notebooks may display interrupted runs or incomplete iteration ranges.
 
-This trade-off was necessary to complete experiments within reasonable time limits.
+These artifacts **do not affect the validity of the reported results**.
+
+All final experimental outcomes were:
+- Collected from completed runs
+- Verified for consistency
+- Consolidated into dedicated JSON result files
+
+All figures in `results/figures/` are generated exclusively from these consolidated results.
 
 ---
 
 ## Reproducibility
 
-Experiments in `main/` can be reproduced by running the corresponding notebooks.
-Trial notebooks are kept as-is and may not be fully cleaned or optimized.
+- Experiments in `main/` can be reproduced by running the corresponding notebooks.
+- Random seeds, pruning masks, and training configurations are logged in the result files.
+- Trial notebooks are provided as-is and may not be fully cleaned or optimized.
 
 ---
 
