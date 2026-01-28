@@ -56,7 +56,7 @@ The project was developed step by step, with regular meetings and close collabor
 
 During the project, we met regularly to share baseline results, pruning curves, and observations about training behavior. Final figures and conclusions were obtained by checking consistency across implementations, ensuring that the results are reproducible and fairly comparable across different pruning strategies.
 
-## Notebooks and Results
+## Notebooks and Results （Updated on 28.01.2026）
 
 Attention please! We have created branches for each team member, where the training notebooks and results locate. Due to the different traing setup for each person, the training_utils.py and pruning.py in the main branch are not used by everyone. Each team member has own adapted version or different training utilities and model notebook. The details of each model training is in personal branch, please kindly check them in the corresponding branch.
 
